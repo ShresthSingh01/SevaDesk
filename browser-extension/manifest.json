@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "SevaDesk Browser Companion",
+  "version": "1.0.0",
+  "description": "Review visible form fields, validate mapped values, and assist with deliberate form filling on the current tab.",
+  "permissions": ["activeTab", "scripting"],
+  "action": {
+    "default_title": "SevaDesk Browser Companion",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
