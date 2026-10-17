@@ -53,6 +53,81 @@ class BhashiniSpeechService:
         prefix = lang_code.split('-')[0].lower()
         return templates.get(prefix, templates["en"])
 
+    def get_readback_speech_text(
+        self,
+        full_name: Optional[str] = None,
+        dob: Optional[str] = None,
+        pincode: Optional[str] = None,
+        masked_id: Optional[str] = None,
+        lang_code: str = 'hi'
+    ) -> str:
+        name_part = full_name.strip() if full_name else "नागरिक"
+        dob_part = dob.strip() if dob else ""
+        pin_part = pincode.strip() if pincode else ""
+        id_part = masked_id.strip() if masked_id else ""
+        prefix = lang_code.split('-')[0].lower()
+
+        if prefix == 'hi':
+            msg = f"पहचान सत्यापन: आपके दस्तावेज़ से नाम {name_part}"
+            if dob_part:
+                msg += f", जन्म तिथि {dob_part}"
+            if pin_part:
+                msg += f", पिन कोड {pin_part}"
+            if id_part:
+                msg += f", पहचान संख्या {id_part}"
+            msg += " पढ़ा गया है। कृपया पुष्टि करें कि यह जानकारी सही है।"
+            return msg
+        elif prefix == 'mr':
+            msg = f"ओळख पडताळणी: आपल्या कागदपत्रावरून नाव {name_part}"
+            if dob_part:
+                msg += f", जन्मतारीख {dob_part}"
+            if pin_part:
+                msg += f", पिन कोड {pin_part}"
+            msg += " वाचले आहे. ही माहिती बरोबर आहे का?"
+            return msg
+        elif prefix == 'ta':
+            msg = f"அடையாள சரிபார்ப்பு: உங்கள் ஆவணத்திலிருந்து பெயர் {name_part}"
+            if dob_part:
+                msg += f", பிறந்த தேதி {dob_part}"
+            if pin_part:
+                msg += f", அஞ்சல் குறியீடு {pin_part}"
+            msg += " படிக்கப்பட்டுள்ளது. இந்த விவரங்கள் சரியானவையா?"
+            return msg
+        elif prefix == 'te':
+            msg = f"గుర్తింపు ధృవీకరణ: మీ పత్రం నుండి పేరు {name_part}"
+            if dob_part:
+                msg += f", పుట్టిన తేదీ {dob_part}"
+            if pin_part:
+                msg += f", పిన్ కోడ్ {pin_part}"
+            msg += " చదవబడింది. ఈ వివరాలు సరైనవేనా?"
+            return msg
+        elif prefix == 'bn':
+            msg = f"পরিচয় যাচাইকরণ: আপনার নথি থেকে নাম {name_part}"
+            if dob_part:
+                msg += f", জন্ম তারিখ {dob_part}"
+            if pin_part:
+                msg += f", পিন কোড {pin_part}"
+            msg += " পড়া হয়েছে। এই তথ্য কি সঠিক?"
+            return msg
+        elif prefix == 'gu':
+            msg = f"ઓળખ ચકાસણી: તમારા દસ્તાવેજમાંથી નામ {name_part}"
+            if dob_part:
+                msg += f", જન્મ તારીખ {dob_part}"
+            if pin_part:
+                msg += f", પિન કોડ {pin_part}"
+            msg += " વાંચવામાં આવ્યું છે. શું આ માહિતી સાચી છે?"
+            return msg
+        else:
+            msg = f"Identity verification: From your document, we have read Name: {name_part}"
+            if dob_part:
+                msg += f", Date of Birth: {dob_part}"
+            if pin_part:
+                msg += f", PIN code: {pin_part}"
+            if id_part:
+                msg += f", ID number {id_part}"
+            msg += ". Please confirm if these details are correct."
+            return msg
+
     def synthesize(self, text: str, lang_code: str = 'hi') -> bytes:
         cache_key = hashlib.sha256(f"{lang_code}:{text}".encode('utf-8')).hexdigest()
         cache_path = self.cache_dir / f"{cache_key}.wav"

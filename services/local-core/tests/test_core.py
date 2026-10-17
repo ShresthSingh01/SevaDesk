@@ -184,3 +184,16 @@ def test_speech_generation():
     assert "केंद्र सेवा शुल्क: 25.00" in text
     wav_bytes = bhashini_service.synthesize(text, "hi")
     assert len(wav_bytes) > 44  # Valid WAV header and data
+
+def test_readback_speech_generation():
+    hi_text = bhashini_service.get_readback_speech_text("Ramesh Kumar", "1985-08-15", "411001", "••••••••0013", "hi")
+    assert "पहचान सत्यापन" in hi_text
+    assert "Ramesh Kumar" in hi_text
+    assert "1985-08-15" in hi_text
+    assert "411001" in hi_text
+
+    mr_text = bhashini_service.get_readback_speech_text("Ramesh Kumar", "1985-08-15", "411001", "••••••••0013", "mr")
+    assert "ओळख पडताळणी" in mr_text
+
+    en_text = bhashini_service.get_readback_speech_text("Ramesh Kumar", "1985-08-15", "411001", "••••••••0013", "en")
+    assert "Identity verification" in en_text

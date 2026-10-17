@@ -1,4 +1,12 @@
-import { requestFeeSpeechWav } from './api';
+import { requestFeeSpeechWav, requestReadbackSpeechWav } from './api';
+
+export interface OcrReadbackFields {
+  fullName?: string;
+  dob?: string;
+  gender?: string;
+  pincode?: string;
+  maskedId?: string;
+}
 
 export function getFeeDisclosureText(
   serviceName: string,
@@ -66,4 +74,111 @@ export async function playFeeSpeech(
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
   await audio.play();
+}
+
+export function getOcrReadbackText(
+  fields: OcrReadbackFields,
+  langCode: string = 'hi-IN'
+): string {
+  const name = fields.fullName?.trim() || 'नागरिक';
+  const dob = fields.dob?.trim();
+  const pin = fields.pincode?.trim();
+  const id = fields.maskedId?.trim();
+  const prefix = langCode.split('-')[0].toLowerCase();
+
+  switch (prefix) {
+    case 'hi': {
+      let t = `पहचान सत्यापन: आपके दस्तावेज़ से नाम ${name}`;
+      if (dob) t += `, जन्म तिथि ${dob}`;
+      if (pin) t += `, पिन कोड ${pin}`;
+      if (id) t += `, पहचान संख्या ${id}`;
+      t += ` पढ़ा गया है। कृपया पुष्टि करें कि यह जानकारी सही है।`;
+      return t;
+    }
+    case 'mr': {
+      let t = `ओळख पडताळणी: आपल्या कागदपत्रावरून नाव ${name}`;
+      if (dob) t += `, जन्मतारीख ${dob}`;
+      if (pin) t += `, पिन कोड ${pin}`;
+      t += ` वाचले आहे. ही माहिती बरोबर आहे का?`;
+      return t;
+    }
+    case 'ta': {
+      let t = `அடையாள சரிபார்ப்பு: உங்கள் ஆவணத்திலிருந்து பெயர் ${name}`;
+      if (dob) t += `, பிறந்த தேதி ${dob}`;
+      if (pin) t += `, அஞ்சல் குறியீடு ${pin}`;
+      t += ` படிக்கப்பட்டுள்ளது. இந்த விவரங்கள் சரியானவையா?`;
+      return t;
+    }
+    case 'te': {
+      let t = `గుర్తింపు ధృవీకరణ: మీ పత్రం నుండి పేరు ${name}`;
+      if (dob) t += `, పుట్టిన తేదీ ${dob}`;
+      if (pin) t += `, పిన్ కోడ్ ${pin}`;
+      t += ` చదవబడింది. ఈ వివరాలు సరైనవేనా?`;
+      return t;
+    }
+    case 'bn': {
+      let t = `পরিচয় যাচাইকরণ: আপনার নথি থেকে নাম ${name}`;
+      if (dob) t += `, জন্ম তারিখ ${dob}`;
+      if (pin) t += `, পিন কোড ${pin}`;
+      t += ` পড়া হয়েছে। এই তথ্য কি সঠিক?`;
+      return t;
+    }
+    case 'gu': {
+      let t = `ઓળખ ચકાસણી: તમારા દસ્તાવેજમાંથી નામ ${name}`;
+      if (dob) t += `, જન્મ તારીખ ${dob}`;
+      if (pin) t += `, પિન કોડ ${pin}`;
+      t += ` વાંચવામાં આવ્યું છે. શું આ વિગતો સાચી છે?`;
+      return t;
+    }
+    default: {
+      let t = `Identity verification: From your document, we have read Name: ${name}`;
+      if (dob) t += `, Date of Birth: ${dob}`;
+      if (pin) t += `, PIN code: ${pin}`;
+      if (id) t += `, ID number ${id}`;
+      t += `. Please confirm if these details are correct.`;
+      return t;
+    }
+  }
+}
+
+export async function playOcrReadbackSpeech(
+  fields: OcrReadbackFields,
+  langCode: string = 'hi-IN',
+  preferDaemon: boolean = false
+): Promise<void> {
+  const text = getOcrReadbackText(fields, langCode);
+
+  if ('speechSynthesis' in window && !preferDaemon) {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = langCode;
+
+    const voices = window.speechSynthesis.getVoices();
+    const prefix = langCode.split('-')[0].toLowerCase();
+    const match = voices.find(v => v.lang.toLowerCase().startsWith(prefix));
+    if (match) {
+      utterance.voice = match;
+    }
+
+    utterance.rate = 0.92;
+    return new Promise((resolve) => {
+      utterance.onend = () => resolve();
+      utterance.onerror = () => resolve();
+      window.speechSynthesis.speak(utterance);
+    });
+  }
+
+  // Fallback to local daemon WAV synthesis
+  try {
+    const blob = await requestReadbackSpeechWav(fields.fullName, fields.dob, fields.pincode, fields.maskedId, langCode);
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    return new Promise((resolve) => {
+      audio.onended = () => resolve();
+      audio.onerror = () => resolve();
+      audio.play().catch(() => resolve());
+    });
+  } catch (err) {
+    console.warn('Readback speech audio fallback error:', err);
+  }
 }

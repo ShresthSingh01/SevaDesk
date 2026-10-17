@@ -9,10 +9,13 @@ import {
   Sparkles,
   ArrowRight,
   Eye,
-  EyeOff
+  EyeOff,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { Citizen, OcrCandidate, extractOcrCandidates, maskIdentifier, validateCitizen } from '@sevadesk/core-types';
 import { requestOcrScan } from '../lib/api';
+import { playOcrReadbackSpeech } from '../lib/speech';
 import Tesseract from 'tesseract.js';
 
 interface CitizenIntakeProps {
@@ -62,6 +65,9 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
   const [ocrEngineUsed, setOcrEngineUsed] = useState('');
   const [ocrMessage, setOcrMessage] = useState('');
   const [formErrors, setFormErrors] = useState<string[]>([]);
+  const [audioLang, setAudioLang] = useState('hi-IN');
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [readbackVerified, setReadbackVerified] = useState(false);
 
   const handleInputChange = (field: keyof Citizen, val: string) => {
     setFormData(prev => ({ ...prev, [field]: val }));
@@ -155,6 +161,34 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
     });
   };
 
+  const handleSpeakReadback = async () => {
+    if (isSpeaking) {
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+
+    const nameCand = ocrCandidates.find(c => c.key === 'fullName')?.value || formData.fullName;
+    const dobCand = ocrCandidates.find(c => c.key === 'dob')?.value || formData.dob;
+    const pinCand = ocrCandidates.find(c => c.key === 'pincode')?.value || formData.pincode;
+    const aadhaarCand = ocrCandidates.find(c => c.key === 'aadhaar')?.value || formData.aadhaar;
+    const maskedId = aadhaarCand ? maskIdentifier(aadhaarCand) : undefined;
+
+    setIsSpeaking(true);
+    try {
+      await playOcrReadbackSpeech({
+        fullName: nameCand,
+        dob: dobCand,
+        pincode: pinCand,
+        maskedId: maskedId
+      }, audioLang);
+    } catch (err) {
+      console.warn('Speech playback error:', err);
+    } finally {
+      setIsSpeaking(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormErrors([]);
@@ -171,6 +205,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
     }
 
     const now = new Date().toISOString();
+    const consentPurpose = readbackVerified
+      ? `Informed consent verified via regional audio readback (${audioLang.split('-')[0].toUpperCase()}).`
+      : (formData.consentPurpose || 'Assisted-service application intake with explicit consent.');
+
     const citizenToSave: Citizen = {
       id: formData.id || `CIT-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
       fullName: formData.fullName || '',
@@ -188,7 +226,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
       bankAccount: formData.bankAccount || '',
       ifsc: (formData.ifsc || '').toUpperCase(),
       consentAt: formData.consentAt || now,
-      consentPurpose: formData.consentPurpose || 'Assisted-service application intake with explicit consent.',
+      consentPurpose: consentPurpose,
       createdAt: formData.createdAt || now,
       updatedAt: now
     };
@@ -567,6 +605,72 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                     </label>
                   );
                 })}
+              </div>
+
+              {/* Multilingual Citizen Audio Readback Controls */}
+              <div style={{
+                marginTop: '12px',
+                padding: '10px 12px',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'var(--bg-subtle)',
+                border: '1px solid var(--border-light)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <Volume2 size={13} color="var(--primary)" /> Citizen Audio Readback
+                  </span>
+                  <select
+                    value={audioLang}
+                    onChange={e => setAudioLang(e.target.value)}
+                    style={{
+                      fontSize: '0.72rem',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-light)',
+                      backgroundColor: 'var(--bg-main)',
+                      color: 'var(--text-main)',
+                      outline: 'none'
+                    }}
+                  >
+                    <option value="hi-IN">Hindi (हिंदी)</option>
+                    <option value="mr-IN">Marathi (मराठी)</option>
+                    <option value="ta-IN">Tamil (தமிழ்)</option>
+                    <option value="te-IN">Telugu (తెలుగు)</option>
+                    <option value="bn-IN">Bengali (বাংলা)</option>
+                    <option value="gu-IN">Gujarati (ગુજરાતી)</option>
+                    <option value="en-IN">English</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                    onClick={handleSpeakReadback}
+                  >
+                    {isSpeaking ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                    {isSpeaking ? 'Stop speaking' : 'Read aloud to citizen'}
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${readbackVerified ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ display: 'flex', alignItems: 'center', gap: '5px' }}
+                    onClick={() => setReadbackVerified(prev => !prev)}
+                    title="Citizen verbally confirmed identity readback"
+                  >
+                    <CheckCircle2 size={13} />
+                    {readbackVerified ? 'Verified ✓' : 'Confirm'}
+                  </button>
+                </div>
+
+                {readbackVerified && (
+                  <div style={{ marginTop: '8px', fontSize: '0.72rem', color: 'var(--primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <CheckCircle2 size={12} />
+                    Informed consent verified via spoken {audioLang.split('-')[0].toUpperCase()} readback.
+                  </div>
+                )}
               </div>
 
               <button

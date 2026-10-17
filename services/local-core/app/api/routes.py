@@ -24,6 +24,13 @@ class FeeSpeechRequest(BaseModel):
     operatorCharge: Optional[float] = None
     language: str = "hi-IN"
 
+class ReadbackSpeechRequest(BaseModel):
+    fullName: Optional[str] = None
+    dob: Optional[str] = None
+    pincode: Optional[str] = None
+    maskedId: Optional[str] = None
+    language: str = "hi-IN"
+
 class ProfileRequest(BaseModel):
     operatorName: str
     centreName: str
@@ -75,6 +82,17 @@ def fee_speech(req: FeeSpeechRequest):
 @router.get("/speech/fee-text")
 def fee_speech_text(serviceName: str, officialFee: Optional[float] = None, operatorCharge: Optional[float] = None, language: str = "hi-IN"):
     text = bhashini_service.get_fee_speech_text(serviceName, officialFee, operatorCharge, language)
+    return {"text": text, "language": language}
+
+@router.post("/speech/readback")
+def readback_speech(req: ReadbackSpeechRequest):
+    text = bhashini_service.get_readback_speech_text(req.fullName, req.dob, req.pincode, req.maskedId, req.language)
+    wav_bytes = bhashini_service.synthesize(text, req.language)
+    return Response(content=wav_bytes, media_type="audio/wav")
+
+@router.get("/speech/readback-text")
+def readback_speech_text(fullName: Optional[str] = None, dob: Optional[str] = None, pincode: Optional[str] = None, maskedId: Optional[str] = None, language: str = "hi-IN"):
+    text = bhashini_service.get_readback_speech_text(fullName, dob, pincode, maskedId, language)
     return {"text": text, "language": language}
 
 # --- Workspace Profile ---

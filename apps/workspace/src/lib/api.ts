@@ -42,6 +42,22 @@ export async function requestFeeSpeechWav(serviceName: string, officialFee?: num
   return await res.blob();
 }
 
+export async function requestReadbackSpeechWav(
+  fullName?: string,
+  dob?: string,
+  pincode?: string,
+  maskedId?: string,
+  language: string = 'hi-IN'
+): Promise<Blob> {
+  const res = await fetch(`${LOCAL_API_BASE}/speech/readback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fullName, dob, pincode, maskedId, language })
+  });
+  if (!res.ok) throw new Error('Readback audio synthesis failed.');
+  return await res.blob();
+}
+
 // --- Live SQLite Sync on Local Core Daemon ---
 export async function syncCitizenToDaemon(citizen: any) {
   try {
