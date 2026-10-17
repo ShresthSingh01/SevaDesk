@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { Citizen, OcrCandidate, extractOcrCandidates, maskIdentifier, validateCitizen } from '@sevadesk/core-types';
 import { requestOcrScan } from '../lib/api';
-import { playOcrReadbackSpeech } from '../lib/speech';
+import { playOcrReadbackSpeech, getOcrReadbackText } from '../lib/speech';
 import Tesseract from 'tesseract.js';
 
 interface CitizenIntakeProps {
@@ -68,6 +68,21 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
   const [audioLang, setAudioLang] = useState('hi-IN');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [readbackVerified, setReadbackVerified] = useState(false);
+
+  const previewName = ocrCandidates.find(c => c.key === 'fullName')?.value || formData.fullName || 'नागरिक';
+  const previewDob = ocrCandidates.find(c => c.key === 'dob')?.value || formData.dob;
+  const previewPin = ocrCandidates.find(c => c.key === 'pincode')?.value || formData.pincode;
+  const previewAadhaar = ocrCandidates.find(c => c.key === 'aadhaar')?.value || formData.aadhaar;
+  const previewMaskedId = previewAadhaar ? maskIdentifier(previewAadhaar) : undefined;
+
+  const previewReadbackText = getOcrReadbackText({
+    fullName: previewName,
+    dob: previewDob,
+    pincode: previewPin,
+    maskedId: previewMaskedId
+  }, audioLang);
+
+  const hasReadbackData = ocrCandidates.length > 0 || Boolean(formData.fullName?.trim());
 
   const handleInputChange = (field: keyof Citizen, val: string) => {
     setFormData(prev => ({ ...prev, [field]: val }));
@@ -475,23 +490,43 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
 
           {/* Consent Checkbox */}
           <div style={{
-            padding: '14px',
+            padding: '16px',
             borderRadius: 'var(--radius-md)',
             backgroundColor: consentChecked ? 'var(--status-good-bg)' : 'var(--status-warn-bg)',
             border: `1px solid ${consentChecked ? 'var(--primary-border)' : 'var(--status-warn)'}`,
-            marginBottom: '20px'
+            marginBottom: '20px',
+            transition: 'all 0.2s ease'
           }}>
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
               <input
                 type="checkbox"
                 checked={consentChecked}
                 onChange={e => setConsentChecked(e.target.checked)}
-                style={{ marginTop: '3px' }}
+                style={{ marginTop: '3px', accentColor: 'var(--primary)' }}
                 required
               />
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.4 }}>
-                <strong>Explicit Citizen Consent:</strong> I have explained to the applicant why these details are collected, obtained their consent for assisted entry, and will confirm the specific scheme with them before final submission.
-              </span>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.4, display: 'block' }}>
+                  <strong>Explicit Citizen Consent (DPDP Act 2023):</strong> I have explained to the applicant why these details are collected, obtained informed consent for assisted entry, and verified the accuracy of demographic records.
+                </span>
+                {readbackVerified && (
+                  <div style={{
+                    marginTop: '8px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '4px 10px',
+                    borderRadius: 'var(--radius-full)',
+                    backgroundColor: 'var(--primary)',
+                    color: '#ffffff',
+                    fontSize: '0.72rem',
+                    fontWeight: 600
+                  }}>
+                    <CheckCircle2 size={13} />
+                    Informed Consent Verified via Spoken Readback ({audioLang.split('-')[0].toUpperCase()})
+                  </div>
+                )}
+              </div>
             </label>
           </div>
 
@@ -541,6 +576,22 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 {ocrFile.name} ({(ocrFile.size / 1024).toFixed(1)} KB)
               </div>
             )}
+
+            <div style={{
+              marginTop: '12px',
+              padding: '8px 10px',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'var(--bg-accent)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              textAlign: 'left'
+            }}>
+              <Volume2 size={15} color="var(--primary)" style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-main)', lineHeight: 1.35 }}>
+                <strong>Multimodal Readback:</strong> Automatic speech synthesis in 7 regional languages for non-literate & visually impaired citizens.
+              </span>
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
@@ -568,7 +619,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Check values to apply</span>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '280px', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '240px', overflowY: 'auto' }}>
                 {ocrCandidates.map(cand => {
                   const isChecked = selectedCandidateKeys.has(cand.key);
                   return (
@@ -583,13 +634,15 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                         backgroundColor: isChecked ? 'var(--primary-light)' : 'var(--bg-subtle)',
                         border: `1px solid ${isChecked ? 'var(--primary-border)' : 'var(--border-light)'}`,
                         fontSize: '0.825rem',
-                        cursor: 'pointer'
+                        cursor: 'pointer',
+                        transition: 'background-color 0.15s ease, border-color 0.15s ease'
                       }}
                     >
                       <input
                         type="checkbox"
                         checked={isChecked}
                         onChange={() => toggleCandidateKey(cand.key)}
+                        style={{ accentColor: 'var(--primary)' }}
                       />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
@@ -599,7 +652,15 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                           {cand.sensitive ? maskIdentifier(cand.value) : cand.value}
                         </strong>
                       </div>
-                      <span style={{ fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 600 }}>
+                      <span style={{
+                        fontSize: '0.7rem',
+                        color: 'var(--primary)',
+                        fontWeight: 700,
+                        backgroundColor: 'var(--primary-light)',
+                        padding: '2px 8px',
+                        borderRadius: 'var(--radius-full)',
+                        border: '1px solid var(--primary-border)'
+                      }}>
                         {typeof cand.confidence === 'number' ? `${Math.round(cand.confidence * 100)}%` : cand.confidence}
                       </span>
                     </label>
@@ -607,28 +668,87 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 })}
               </div>
 
-              {/* Multilingual Citizen Audio Readback Controls */}
-              <div style={{
-                marginTop: '12px',
-                padding: '10px 12px',
-                borderRadius: 'var(--radius-sm)',
-                backgroundColor: 'var(--bg-subtle)',
-                border: '1px solid var(--border-light)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Volume2 size={13} color="var(--primary)" /> Citizen Audio Readback
-                  </span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleApplyOcr}
+                disabled={selectedCandidateKeys.size === 0}
+                style={{
+                  width: '100%',
+                  marginTop: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Check size={14} /> Apply {selectedCandidateKeys.size} checked value(s) to form
+              </button>
+            </div>
+          )}
+
+          {/* Multilingual Citizen Audio Readback & Closed-Loop Verification Card */}
+          {hasReadbackData ? (
+            <div style={{
+              marginTop: '16px',
+              padding: '14px 16px',
+              borderRadius: 'var(--radius-md)',
+              background: 'linear-gradient(135deg, rgba(234, 246, 237, 0.75) 0%, #ffffff 100%)',
+              border: '1px solid var(--primary-border)',
+              boxShadow: '0 2px 8px rgba(27, 67, 50, 0.05)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px'
+            }}>
+              {/* Card Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    backgroundColor: 'var(--primary-light)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--primary)',
+                    flexShrink: 0
+                  }}>
+                    <Volume2 size={16} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      DPDP Inclusivity & Verification
+                    </div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      Citizen Spoken Readback
+                      {isSpeaking && (
+                        <div className="soundwave-container active" title="Audio playing to citizen">
+                          <span className="soundwave-bar" />
+                          <span className="soundwave-bar" />
+                          <span className="soundwave-bar" />
+                          <span className="soundwave-bar" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <label htmlFor="ocrAudioLang" style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Lang:</label>
                   <select
+                    id="ocrAudioLang"
                     value={audioLang}
                     onChange={e => setAudioLang(e.target.value)}
                     style={{
-                      fontSize: '0.72rem',
-                      padding: '2px 6px',
-                      borderRadius: '4px',
-                      border: '1px solid var(--border-light)',
-                      backgroundColor: 'var(--bg-main)',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      padding: '3px 8px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-strong)',
+                      backgroundColor: '#ffffff',
                       color: 'var(--text-main)',
+                      cursor: 'pointer',
                       outline: 'none'
                     }}
                   >
@@ -641,46 +761,111 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                     <option value="en-IN">English</option>
                   </select>
                 </div>
-
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-                    onClick={handleSpeakReadback}
-                  >
-                    {isSpeaking ? <VolumeX size={13} /> : <Volume2 size={13} />}
-                    {isSpeaking ? 'Stop speaking' : 'Read aloud to citizen'}
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${readbackVerified ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ display: 'flex', alignItems: 'center', gap: '5px' }}
-                    onClick={() => setReadbackVerified(prev => !prev)}
-                    title="Citizen verbally confirmed identity readback"
-                  >
-                    <CheckCircle2 size={13} />
-                    {readbackVerified ? 'Verified ✓' : 'Confirm'}
-                  </button>
-                </div>
-
-                {readbackVerified && (
-                  <div style={{ marginTop: '8px', fontSize: '0.72rem', color: 'var(--primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <CheckCircle2 size={12} />
-                    Informed consent verified via spoken {audioLang.split('-')[0].toUpperCase()} readback.
-                  </div>
-                )}
               </div>
 
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={handleApplyOcr}
-                disabled={selectedCandidateKeys.size === 0}
-                style={{ width: '100%', marginTop: '12px' }}
-              >
-                Apply {selectedCandidateKeys.size} checked value(s) to form
-              </button>
+              {/* Spoken Transcript Live Preview */}
+              <div style={{
+                padding: '9px 12px',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'rgba(255, 255, 255, 0.92)',
+                border: '1px dashed var(--primary-border)',
+                fontSize: '0.75rem',
+                color: 'var(--text-main)',
+                lineHeight: 1.45
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                  <span style={{ fontSize: '0.67rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                    Spoken Transcript Preview
+                  </span>
+                  <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                    {audioLang.split('-')[0].toUpperCase()}
+                  </span>
+                </div>
+                <p style={{ margin: 0, fontStyle: 'italic', color: 'var(--text-main)' }}>
+                  "{previewReadbackText}"
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    backgroundColor: isSpeaking ? 'var(--status-bad-bg)' : '#ffffff',
+                    borderColor: isSpeaking ? 'var(--status-bad)' : 'var(--border-strong)',
+                    color: isSpeaking ? 'var(--status-bad)' : 'var(--text-main)',
+                    fontWeight: 600
+                  }}
+                  onClick={handleSpeakReadback}
+                >
+                  {isSpeaking ? <VolumeX size={14} /> : <Volume2 size={14} color="var(--primary)" />}
+                  {isSpeaking ? 'Stop speaking' : 'Read aloud to citizen'}
+                </button>
+
+                <button
+                  type="button"
+                  className={`btn btn-sm ${readbackVerified ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    fontWeight: 600,
+                    backgroundColor: readbackVerified ? 'var(--primary)' : '#ffffff'
+                  }}
+                  onClick={() => {
+                    const next = !readbackVerified;
+                    setReadbackVerified(next);
+                    if (next) setConsentChecked(true);
+                  }}
+                  title="Citizen verbally confirmed identity readback"
+                >
+                  <CheckCircle2 size={14} />
+                  {readbackVerified ? 'Verified ✓' : 'Confirm consent'}
+                </button>
+              </div>
+
+              {/* Verified Feedback Pill */}
+              {readbackVerified && (
+                <div style={{
+                  padding: '7px 10px',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'var(--status-good-bg)',
+                  border: '1px solid var(--primary-border)',
+                  fontSize: '0.72rem',
+                  color: 'var(--status-good)',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  <CheckCircle2 size={13} color="var(--status-good)" style={{ flexShrink: 0 }} />
+                  <span>Informed consent verified via {audioLang.split('-')[0].toUpperCase()} audio readback. Recorded in DPDP audit log.</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{
+              marginTop: '16px',
+              padding: '12px 14px',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'var(--bg-subtle)',
+              border: '1px dashed var(--border-strong)',
+              textAlign: 'center',
+              fontSize: '0.75rem',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '4px'
+            }}>
+              <Volume2 size={18} color="var(--primary)" />
+              <span>Enter citizen name or upload an ID document to activate regional spoken readback & closed-loop verification.</span>
             </div>
           )}
 
