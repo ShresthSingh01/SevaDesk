@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SevaDesk Browser Companion</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="brandbar">
+    <div class="mark">S</div>
+    <div><strong>SevaDesk</strong><span>Browser companion v2.0</span></div>
+    <span class="privacy-pill">ACTIVE TAB ONLY</span>
+  </header>
+  <main>
+    <section class="step-card">
+      <div class="step-head">
+        <span class="step-number">1</span>
+        <div>
+          <h1>Load application data</h1>
+          <p>Copy from SevaDesk, then paste below. Values stay in temporary memory.</p>
+        </div>
+      </div>
+      <textarea id="payloadInput" spellcheck="false" placeholder="Paste the JSON payload copied from SevaDesk…"></textarea>
+      <div class="row-actions">
+        <button id="loadPayload" class="btn btn-primary">Load payload</button>
+        <button id="clearPayload" class="btn btn-quiet">Clear</button>
+      </div>
+      <div id="payloadStatus" class="status-note" role="status"></div>
+    </section>
+
+    <section class="step-card">
+      <div class="step-head">
+        <span class="step-number">2</span>
+        <div>
+          <h2>Inspect active portal & adapter</h2>
+          <p>Detects official state adapters (MahaDBT, UP e-District, Saral) or heuristic fallback.</p>
+        </div>
+      </div>
+      <div id="adapterBadge" class="adapter-badge hidden"></div>
+      <div class="row-actions">
+        <button id="scanPage" class="btn btn-secondary" disabled>Scan visible fields</button>
+        <button id="scanErrors" class="btn btn-secondary">Inspect error messages</button>
+      </div>
+      <div id="pageStatus" class="status-note" role="status">Load a payload, open the official portal tab, then scan.</div>
+      <div id="portalErrors" class="error-list"></div>
+    </section>
+
+    <section id="mappingSection" class="step-card hidden">
+      <div class="step-head">
+        <span class="step-number">3</span>
+        <div>
+          <h2>Review each field mapping</h2>
+          <p>Check the target field and value before filling. Low-confidence matches are not preselected.</p>
+        </div>
+      </div>
+      <div class="mapping-summary" id="mappingSummary"></div>
+      <div id="mappingRows" class="mapping-list"></div>
+      <div id="mappingWarnings" class="warning-list"></div>
+      <div class="row-actions sticky-actions">
+        <button id="fillFields" class="btn btn-primary" disabled>Fill reviewed fields</button>
+        <button id="rescanPage" class="btn btn-quiet">Rescan</button>
+      </div>
+      <div id="fillResult" class="status-note" role="status"></div>
+    </section>
+
+    <section class="safety-note">
+      <span class="safety-icon">!</span>
+      <div>
+        <strong>Human review stays in control</strong>
+        <p>This companion never clicks Submit, enters passwords, fills OTP/CAPTCHA controls, uploads files or bypasses safeguards. Review every value and submit yourself.</p>
+      </div>
+    </section>
+    <footer>MV3 activeTab + scripting only. Zero cloud calls. Zero persistent citizen storage.</footer>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

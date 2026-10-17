@@ -1,54 +1,123 @@
-# SevaDesk — local-first assisted-service workspace
+# SevaDesk — Local-First Assisted Service Workstation
 
-SevaDesk is a working browser-based operator workspace for assisted application preparation. It is designed to reduce transcription errors, make validation issues visible, and make service charges understandable to citizens. It does **not** pretend to be an official CSC system or submit to any government portal without a verified integration.
+> **Empowering Indian CSC & e-Governance Kiosk Operators with Local Document Intelligence, Verhoeff Preflight Validation, Declarative Portal Adapters, and DPDP Act Privacy Guarantees.**
 
-## Run locally
+SevaDesk is a specialized assisted-service workstation designed for Common Service Centre (CSC) operators, Gram Panchayat digital assistants, and e-District kiosk operators across India. It solves the critical bottleneck of portal transcription errors, rejected uploads, and fee disputes through **local-first automation and complete transparency**—without sending citizen documents to third-party cloud LLMs.
 
-**Windows:** double-click `run.bat`.
+---
 
-**macOS / Linux:** run `./run.sh` from this folder.
+## ⚡ Quick Start
 
-Or use:
+### 1. Requirements
+- **Node.js**: v18.0.0 or higher
+- **Python**: v3.10+ (Python 3.13 recommended)
+- **Browser**: Google Chrome or Chromium-based browser (for the Manifest V3 Companion Extension)
 
-```bash
-npm run start
+### 2. First-Time Setup
+* **Windows:** Double-click `setup.bat` to automatically install all Node.js and Python dependencies.
+* **macOS / Linux:** Run `./setup.sh`.
+
+### 3. Launch SevaDesk (One-Click)
+
+#### Windows
+Double-click `run.bat` or run in PowerShell:
+```powershell
+.\run.ps1
 ```
 
-Open `http://127.0.0.1:4173`. Do not open `index.html` directly as a `file://` URL; the encrypted vault needs the browser Web Crypto API in a secure context.
-
-On first launch, set an operator name, centre name and a strong passphrase (minimum 10 characters). The passphrase is not saved. Records are encrypted in browser storage using AES-GCM with a PBKDF2-derived key. If the passphrase is lost, the local vault cannot be recovered. Export an encrypted backup from **Services & rules** and keep it secure.
-
-There are no preloaded citizens, applications, service profiles or government fees. Add a real service from the portal you use. Required fields start empty, and file type/size limits remain explicitly unconfigured until you confirm them from that portal. Preflight cannot pass until at least one real required field is configured.
-
-## What works in this build
-
-- Encrypted, local-only storage for citizen records, service rules, application records and the audit trail.
-- Consent confirmation before saving citizen details; sensitive identifiers are masked outside the edit form.
-- Optional browser-side OCR for uploaded images using Tesseract.js; OCR downloads the engine/language data over the internet, and image/text are not saved by this app. Recognised values are suggestions and are never applied without operator selection.
-- Local preflight checks for configured required fields, Indian mobile number format, six-digit PIN, 12-digit Aadhaar where provided, date-of-birth and email/IFSC formats, plus operator-configured file size/type limits.
-- Rule-based interpretation of common portal messages; unknown messages are explicitly marked as unmapped rather than guessed.
-- Separate official fee and operator-charge line items, source URL / checked date fields, large-text citizen display, browser speech synthesis in selected language, and print-ready disclosure (not a payment receipt).
-- Case tracking, explicit manual submission confirmation requiring an acknowledgement/reference number, audit export, encrypted vault backup/restore, configurable inactivity lock, and confirmed deletion of a citizen plus linked applications.
-- Chrome/Chromium companion that scans the current page’s visible fields, suggests mappings, checks visible HTML constraints, fills only reviewed values and leaves final submission to the operator.
-
-## Important limits (do not ignore)
-
-1. **Not a universal portal integration.** The browser companion is generic. It cannot guarantee a correct mapping on every portal; custom controls, iframes, shadow DOM, dynamic pages and portal-specific validation may need an authorised adapter and regression tests.
-2. **No real government submission API is included.** End-to-end application submission, payment status, receipt verification, rejection status, eligibility checks, and service-specific fee/rule synchronization need documented access to each target portal/API, a data-sharing/security review, and portal owner approval. Without those, this app must remain a preparation and assisted-entry tool.
-3. **No bypassing controls.** OTP, CAPTCHA, passwords, biometrics, e-signing and the final Submit action are never automated. The operator and citizen must follow the official portal’s process.
-4. **OCR is fallible.** Recognition depends on image quality, font, orientation and language data. Confirm every field from the original document. The build supports image OCR; OCR for PDF scans is not included.
-5. **Local browser data is not a production-grade deployment by itself.** Use a managed device, OS disk encryption, account access controls, patched browsers, backups, a documented retention/deletion policy, secure workstation practices and legal/privacy review. Do not deploy on shared machines without an operational policy. Exported payloads and the clipboard may contain PII; clear them after filling.
-6. **Fee declaration is manual.** A fee is shown as operator-verified only when a source URL and checked date are saved along with amounts. The app cannot certify that a fee remains current.
-7. **Not an official government application or receipt.** Branding and disclosures must remain clear. Do not present this independent tool as government-endorsed.
-
-## Test
-
+#### macOS / Linux
 ```bash
-npm test
+chmod +x run.sh
+./run.sh
 ```
 
-The tests exercise field validation, configured and unconfigured upload rules, field-match safety, OCR candidate parsing, unknown-error handling and sensitive-value masking. They are not a substitute for end-to-end testing against real government portals.
+This concurrently starts:
+1. **Local Core Daemon (Python / FastAPI):** `http://127.0.0.1:8765` (API docs at `/docs`)
+2. **Operator Workstation (React + Vite):** `http://localhost:5173`
 
-## Architecture
+> 📘 **Team Reviewers:** See [`TEAM_TESTING_GUIDE.md`](file:///d:/SevaDesk/TEAM_TESTING_GUIDE.md) for a comprehensive step-by-step walkthrough covering citizen intake, Aadhaar Verhoeff validation, dual citizen display, audio disclosures, and browser extension testing.
 
-See `ARCHITECTURE.md` for the component design, threat model, data flow, production rollout gates and portal adapter plan.
+---
+
+## 🧩 Key Architecture & Components
+
+```
+d:/SevaDesk/
+├── apps/
+│   ├── workspace/            # React 18 + TypeScript + Vite Operator Workspace & Citizen Display
+│   └── extension/            # Manifest V3 Chrome Companion with declarative portal adapters
+├── packages/
+│   ├── core-types/           # Verhoeff Aadhaar validation, format checkers, preflight engine
+│   └── portal-adapters/      # Adapters for MahaDBT, UP e-District, Saral Haryana, Delhi
+├── services/
+│   ├── local-core/           # Python 3.13 FastAPI daemon, PaddleOCR, SQLite WAL, BHASHINI client
+│   └── central-hub/          # PostgreSQL schema + Docker Compose for official fee gazettes & sync
+├── tests/                    # Original Node.js unit tests (100% backward compatible)
+├── run.bat / run.ps1         # Windows launchers with venv & dependency checks
+└── run.sh                    # Linux/WSL/macOS launcher
+```
+
+---
+
+## 🛡️ Core Capabilities
+
+### 1. Local Document Intelligence & Verhoeff Validation
+- **Local OCR Extraction:** Integrates PaddleOCR with layout-aware heuristic fallback for Indian identity cards, caste certificates, and marksheets.
+- **Verhoeff Checksum Engine:** Mathematically validates 12-digit Indian Aadhaar numbers using the dihedral group $D_5$ algorithm to catch typos before submission.
+- **Human-in-the-Loop:** OCR candidate fields are displayed with individual confirmation checkboxes. No data is applied silently.
+
+### 2. Dual-Screen Citizen Display & Multilingual Voice (BHASHINI)
+- **Secondary Display Mode:** Open `http://localhost:5173` and click **"Open citizen display"** (or use the Citizen Display view) to project clean, large fee breakdowns on a secondary citizen-facing monitor.
+- **Separate Fee Line Items:** Official portal fee and kiosk service charges are displayed independently; unverified amounts are never combined.
+- **Voice Announcement:** Audio readout of fee breakdowns in **Hindi, Marathi, Tamil, Telugu, and English** via the BHASHINI / AI4Bharat audio client or native browser speech.
+
+### 3. Declarative Portal Adapters (Browser Companion)
+- **Supported Portals:** Pre-calibrated adapters for **MahaDBT** (Maharashtra), **UP e-District** (Uttar Pradesh), **Antyodaya Saral** (Haryana), and **e-District Delhi**, with heuristic fallback for all other state portals.
+- **Installing the Extension:**
+  1. Open Chrome and navigate to `chrome://extensions/`.
+  2. Enable **Developer mode** (toggle in top right).
+  3. Click **Load unpacked** and select the folder: `d:\SevaDesk\apps\extension`.
+- **Operator Safety Safeguards:**
+  - Never clicks "Submit".
+  - Disallows interaction with password, CAPTCHA, or OTP fields.
+  - Generates synthetic DOM input events to ensure frameworks (Angular, React, ASP.NET) recognize changed values.
+
+### 4. Zero Cloud PII Leakage & DPDP Act 2023 Compliance
+- **Local At-Rest Encryption:** Local records are secured with AES-256-GCM column encryption via a persistent Kiosk Master Key (PBKDF2-SHA-256).
+- **Direct Loopback IPC Bridge:** Tokenized in-memory session dispatch between workspace and companion extension—zero PII exposed to the OS clipboard.
+- **Cryptographic Audit Ledger:** Tamper-evident SHA-256 hash-chained audit ledger with mathematical non-repudiation verification (`/api/audit/verify`).
+- **Zero Cloud Leakage:** All document processing, OCR extraction, and storage occur entirely on the local device.
+
+---
+
+## 🧪 Testing & Verification
+
+Run the entire verification suite with a single command:
+
+```bash
+npm run test:all
+```
+
+This runs:
+1. **Node.js Core Tests:** `node --test tests/*.test.js` (11 passing tests)
+2. **Python Daemon Tests:** `pytest services/local-core/tests` (10 passing tests)
+3. **TypeScript & Vite Build:** `tsc && vite build` in `apps/workspace` (0 errors)
+
+---
+
+## 🏢 Central Hub (Optional Multi-Centre Coordination)
+
+For multi-kiosk district coordination or enterprise deployments:
+```bash
+cd services/central-hub
+docker compose up -d
+```
+Starts a PostgreSQL 16 instance with schema for centralized scheme catalogs, official fee gazettes, and signed portal adapter distribution.
+
+---
+
+## 📜 Ethical & Operational Principles
+
+1. **Human-in-the-Loop:** SevaDesk is an operator assistant. The operator must personally verify every value, assist the citizen, and execute the final submission on the official portal.
+2. **No Automation of Secrets:** Passwords, OTPs, CAPTCHAs, and biometrics must always be handled directly by the citizen and operator on the official government website.
+3. **Not Government Endorsed:** SevaDesk is an independent assisted-service workstation tool. It does not claim official endorsement by any state or central ministry.

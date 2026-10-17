@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sevadesk-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: sevadesk_central
+      POSTGRES_USER: sevadesk_admin
+      POSTGRES_PASSWORD: sevadesk_secure_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init_central_postgres.sql:/docker-entrypoint-initdb.d/init.sql
+
+  central-api:
+    build: .
+    container_name: sevadesk-central-hub
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://sevadesk_admin:sevadesk_secure_password@postgres:5432/sevadesk_central
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateCitizen, validateCase, suggestFieldMatches, extractOcrCandidates, interpretPortalError, maskIdentifier, formatINR } from '../core.js';
+import { validateCitizen, validateCase, suggestFieldMatches, extractOcrCandidates, interpretPortalError, maskIdentifier, formatINR } from '../packages/core-types/index.js';
 
 test('required fields and common formats are validated', () => {
   const invalid = validateCitizen({ fullName: 'A', mobile: '12345', pincode: '1234', dob: '2099-01-01' }, ['fullName', 'district']);

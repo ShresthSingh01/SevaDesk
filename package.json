@@ -1,10 +1,19 @@
 {
-  "name": "sevadesk-local-workspace",
-  "version": "1.0.0",
+  "name": "sevadesk",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "python3 -m http.server 4173 --bind 127.0.0.1",
-    "test": "node --test tests/*.test.js"
-  }
+    "start": "run.bat",
+    "dev": "npm --prefix apps/workspace run dev",
+    "build": "npm --prefix apps/workspace run build",
+    "preview": "npm --prefix apps/workspace run preview",
+    "test": "node --test tests/*.test.js",
+    "test:python": "services\\local-core\\.venv\\Scripts\\python.exe -m pytest services\\local-core\\tests",
+    "test:all": "npm run test && npm run test:python && npm run build"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
 }

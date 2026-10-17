@@ -1,0 +1,18 @@
+{
+  "name": "@sevadesk/browser-extension",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@sevadesk/core-types": "file:../../packages/core-types",
+    "@sevadesk/portal-adapters": "file:../../packages/portal-adapters"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vite": "^6.1.1"
+  }
+}

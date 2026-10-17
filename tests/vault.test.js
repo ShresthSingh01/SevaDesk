@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
-import { deriveVaultKey, encryptVault, decryptVault } from '../vault.js';
+import { deriveVaultKey, encryptVault, decryptVault } from '../packages/core-types/index.js';
 
 // Use Node's standard Web Crypto implementation for deterministic test coverage.
 Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true });

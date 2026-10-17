@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Python Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+services/local-core/.venv/
+
+# Python Bytecode & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.pyd
+
+# Build outputs
+dist/
+dist-ssr/
+build/
+apps/workspace/dist/
+
+# Local database and cache files (do not commit actual kiosk databases)
+*.db-shm
+*.db-wal
+services/local-core/data/*.db-shm
+services/local-core/data/*.db-wal
+.cache/
+~/.cache/
+
+# Environment files with credentials
+.env
+.env.local
+.env.*.local
+*.env
+
+# Operating System & IDE Files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Audio cache scratch files
+*.wav
+!services/local-core/app/speech/test_*.wav
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
