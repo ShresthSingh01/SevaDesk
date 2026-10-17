@@ -701,26 +701,32 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
               gap: '10px'
             }}>
               {/* Card Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{
-                    width: '28px',
-                    height: '28px',
-                    borderRadius: '50%',
-                    backgroundColor: 'var(--primary-light)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'var(--primary)',
-                    flexShrink: 0
-                  }}>
-                    <Volume2 size={16} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      DPDP Inclusivity & Verification
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '0.67rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    DPDP Inclusivity & Verification
+                  </span>
+                  <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                    7 Regional Languages
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      backgroundColor: 'var(--primary-light)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--primary)',
+                      flexShrink: 0
+                    }}>
+                      <Volume2 size={15} />
                     </div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       Citizen Spoken Readback
                       {isSpeaking && (
                         <div className="soundwave-container active" title="Audio playing to citizen">
@@ -732,16 +738,13 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                       )}
                     </div>
                   </div>
-                </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <label htmlFor="ocrAudioLang" style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Lang:</label>
                   <select
                     id="ocrAudioLang"
                     value={audioLang}
                     onChange={e => setAudioLang(e.target.value)}
                     style={{
-                      fontSize: '0.75rem',
+                      fontSize: '0.74rem',
                       fontWeight: 600,
                       padding: '3px 8px',
                       borderRadius: 'var(--radius-sm)',
