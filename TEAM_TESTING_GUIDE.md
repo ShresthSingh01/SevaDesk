@@ -37,7 +37,7 @@ This concurrently launches:
 3. Enter your operator credentials:
    * **Operator Name:** `Arun Patel`
    * **Centre Name:** `Kisan Seva Kendra #104`
-   * **Master Passphrase:** `SevaDesk2026!Master` *(minimum 10 characters)*
+   * **Master Passphrase:** Enter any passphrase of your choice *(minimum 10 characters)*
 4. Click **"Initialize encrypted vault"**.
 5. **Expected Result:**
    * The workspace unlocks into the **Overview Dashboard**.

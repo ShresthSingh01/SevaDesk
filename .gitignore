@@ -23,9 +23,13 @@ dist-ssr/
 build/
 apps/workspace/dist/
 
-# Local database and cache files (do not commit actual kiosk databases)
+# Local database, encryption keys, and cache files (do not commit actual kiosk databases or master keys)
+*.key
+*.db
 *.db-shm
 *.db-wal
+services/local-core/data/*.key
+services/local-core/data/*.db
 services/local-core/data/*.db-shm
 services/local-core/data/*.db-wal
 .cache/

@@ -6,9 +6,9 @@ services:
     container_name: sevadesk-postgres
     restart: always
     environment:
-      POSTGRES_DB: sevadesk_central
-      POSTGRES_USER: sevadesk_admin
-      POSTGRES_PASSWORD: sevadesk_secure_password
+      POSTGRES_DB: ${POSTGRES_DB:-sevadesk_central}
+      POSTGRES_USER: ${POSTGRES_USER:-sevadesk_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}
     ports:
       - "5432:5432"
     volumes:
@@ -20,7 +20,7 @@ services:
     container_name: sevadesk-central-hub
     restart: always
     environment:
-      DATABASE_URL: postgresql://sevadesk_admin:sevadesk_secure_password@postgres:5432/sevadesk_central
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-sevadesk_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sevadesk_central}}
       PORT: 8000
     ports:
       - "8000:8000"
