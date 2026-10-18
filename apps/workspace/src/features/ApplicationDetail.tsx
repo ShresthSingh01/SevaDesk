@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ArrowLeft, 
   Copy, 
@@ -10,7 +10,10 @@ import {
   HelpCircle,
   Clock,
   Sparkles,
-  Send
+  Send,
+  Zap,
+  Activity,
+  RefreshCw
 } from 'lucide-react';
 import { 
   Application, 
@@ -22,7 +25,8 @@ import {
   interpretPortalError,
   buildApplicationPayload
 } from '@sevadesk/core-types';
-import { requestPortalErrorInterpretation, pushBridgeSession } from '../lib/api';
+import { requestPortalErrorInterpretation, pushBridgeSession, checkPortalHealth, PortalHealthStatus } from '../lib/api';
+import { optimizeImageForPortal, formatBytes } from '../lib/imageCompressor';
 
 interface ApplicationDetailProps {
   application: Application;
@@ -55,6 +59,39 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
   const [receiptRef, setReceiptRef] = useState(application.receiptRef || '');
   const [statusNote, setStatusNote] = useState(application.statusNote || '');
   const [confirmedPortal, setConfirmedPortal] = useState(false);
+
+  // Portal Latency & Document Optimization state
+  const [rawFiles, setRawFiles] = useState<File[]>([]);
+  const [portalHealth, setPortalHealth] = useState<PortalHealthStatus | null>(null);
+  const [checkingHealth, setCheckingHealth] = useState(false);
+  const [optimizingDoc, setOptimizingDoc] = useState(false);
+  const [optimizationNote, setOptimizationNote] = useState<string | null>(null);
+
+  const handleCheckPortalHealth = async () => {
+    if (!service?.portalUrl) return;
+    setCheckingHealth(true);
+    try {
+      const res = await checkPortalHealth(service.portalUrl);
+      setPortalHealth(res);
+    } catch {
+      setPortalHealth({
+        url: service.portalUrl,
+        reachable: false,
+        latencyMs: 0,
+        congestion: 'offline',
+        error: 'Local daemon offline or portal host unreachable',
+        checkedAt: new Date().toISOString()
+      });
+    } finally {
+      setCheckingHealth(false);
+    }
+  };
+
+  useEffect(() => {
+    if (service?.portalUrl) {
+      handleCheckPortalHealth();
+    }
+  }, [service?.portalUrl]);
 
   const requiredKeys = service?.requiredFields || [];
   const presentCount = requiredKeys.filter(k => citizen && Boolean(citizen[k as keyof Citizen])).length;
@@ -114,12 +151,54 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).map(f => ({
+    const raw = Array.from(e.target.files || []);
+    setRawFiles(raw);
+    const files = raw.map(f => ({
       name: f.name,
       size: f.size,
       type: f.type
     }));
     setTestFiles(files);
+    setOptimizationNote(null);
+  };
+
+  const handleOptimizeOversizedDocs = async () => {
+    if (rawFiles.length === 0) return;
+    setOptimizingDoc(true);
+    try {
+      const targetMB = service?.maxUploadMB || 0.20;
+      const updatedRaw: File[] = [];
+      let notes: string[] = [];
+
+      for (const rf of rawFiles) {
+        if (rf.type.startsWith('image/') && (rf.size > targetMB * 1024 * 1024)) {
+          const res = await optimizeImageForPortal(rf, targetMB);
+          updatedRaw.push(res.optimizedFile);
+          notes.push(`${rf.name}: ${formatBytes(res.originalSizeBytes)} ➔ ${formatBytes(res.optimizedSizeBytes)} (${res.reductionPercentage}% saved)`);
+        } else {
+          updatedRaw.push(rf);
+        }
+      }
+
+      setRawFiles(updatedRaw);
+      const updatedTestFiles = updatedRaw.map(f => ({
+        name: f.name,
+        size: f.size,
+        type: f.type
+      }));
+      setTestFiles(updatedTestFiles);
+
+      if (notes.length > 0) {
+        setOptimizationNote(`✓ Optimized: ${notes.join(' · ')}`);
+        onShowToast(`Optimized ${notes.length} document(s) on-device!`, 'success');
+      } else {
+        onShowToast('All documents already satisfy portal size limits.', 'success');
+      }
+    } catch (err: any) {
+      onShowToast(err.message || 'Optimization failed.', 'error');
+    } finally {
+      setOptimizingDoc(false);
+    }
   };
 
   const handleStatusSubmit = async (e: React.FormEvent) => {
@@ -306,16 +385,75 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
             </div>
 
             {service?.portalUrl ? (
-              <a
-                href={service.portalUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="btn btn-secondary"
-                style={{ width: '100%', justifyContent: 'space-between', marginBottom: '12px' }}
-              >
-                <span>Open {service.name} portal</span>
-                <ExternalLink size={16} />
-              </a>
+              <>
+                <a
+                  href={service.portalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-secondary"
+                  style={{ width: '100%', justifyContent: 'space-between', marginBottom: '10px' }}
+                >
+                  <span>Open {service.name} portal</span>
+                  <ExternalLink size={16} />
+                </a>
+
+                {/* Real-Time Portal Latency & Congestion Probe */}
+                <div style={{
+                  padding: '9px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'var(--bg-subtle)',
+                  border: '1px solid var(--border-light)',
+                  marginBottom: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: '0.74rem'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Activity size={14} color="var(--primary)" />
+                    <div>
+                      <span style={{ fontWeight: 700, color: 'var(--text-main)' }}>Portal Latency Probe: </span>
+                      {checkingHealth ? (
+                        <span style={{ color: 'var(--text-muted)' }}>Testing server response...</span>
+                      ) : portalHealth ? (
+                        <span>
+                          {portalHealth.congestion === 'fast' && (
+                            <span style={{ color: 'var(--status-good)', fontWeight: 700 }}>
+                              ● Fast ({portalHealth.latencyMs}ms) · Responsive
+                            </span>
+                          )}
+                          {portalHealth.congestion === 'congested' && (
+                            <span style={{ color: 'var(--status-warn)', fontWeight: 700 }}>
+                              ● Congested ({portalHealth.latencyMs}ms) · High Load
+                            </span>
+                          )}
+                          {portalHealth.congestion === 'unhealthy' && (
+                            <span style={{ color: 'var(--status-bad)', fontWeight: 700 }}>
+                              ● Gateway Lag ({portalHealth.latencyMs}ms) · Slow Portal
+                            </span>
+                          )}
+                          {portalHealth.congestion === 'offline' && (
+                            <span style={{ color: 'var(--status-bad)', fontWeight: 700 }}>
+                              ● Offline / Unreachable
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)' }}>Not tested</span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCheckPortalHealth}
+                    disabled={checkingHealth}
+                    title="Re-test portal latency"
+                    style={{ display: 'flex', alignItems: 'center', color: 'var(--primary)', cursor: 'pointer' }}
+                  >
+                    <RefreshCw size={12} className={checkingHealth ? 'spin' : ''} />
+                  </button>
+                </div>
+              </>
             ) : (
               <div style={{ padding: '10px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--status-warn-bg)', color: 'var(--status-warn)', fontSize: '0.8rem', marginBottom: '12px' }}>
                 Portal URL not configured in service rules.
@@ -350,12 +488,70 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
 
             {testFiles.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
-                {testFiles.map((f, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', padding: '4px 8px', background: 'var(--bg-subtle)', borderRadius: '4px' }}>
-                    <span>{f.name}</span>
-                    <span>{(f.size / (1024 * 1024)).toFixed(2)} MB</span>
-                  </div>
-                ))}
+                {testFiles.map((f, i) => {
+                  const isOver = (f.size / (1024 * 1024)) > (service?.maxUploadMB || 0.20);
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        fontSize: '0.78rem',
+                        padding: '6px 10px',
+                        background: isOver ? 'var(--status-bad-bg)' : 'var(--bg-subtle)',
+                        border: `1px solid ${isOver ? 'var(--status-bad)' : 'var(--border-light)'}`,
+                        borderRadius: 'var(--radius-sm)'
+                      }}
+                    >
+                      <span style={{ fontWeight: isOver ? 700 : 500, color: isOver ? 'var(--status-bad)' : 'inherit' }}>
+                        {f.name}
+                      </span>
+                      <span>
+                        {(f.size / (1024 * 1024)).toFixed(2)} MB {isOver ? '(Oversized)' : '✓'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Document Auto-Optimizer Button */}
+            {testFiles.some(f => (f.size / (1024 * 1024)) > (service?.maxUploadMB || 0.20)) && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleOptimizeOversizedDocs}
+                disabled={optimizingDoc}
+                style={{
+                  width: '100%',
+                  marginBottom: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  color: 'var(--primary)',
+                  fontWeight: 600,
+                  backgroundColor: 'var(--primary-light)',
+                  border: '1px solid var(--primary-border)'
+                }}
+              >
+                <Zap size={14} color="var(--primary)" />
+                {optimizingDoc ? 'Optimizing document on-device...' : `⚡ Auto-Optimize Document for Portal (< ${service?.maxUploadMB || 0.2} MB)`}
+              </button>
+            )}
+
+            {optimizationNote && (
+              <div style={{
+                padding: '8px 10px',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'var(--status-good-bg)',
+                border: '1px solid var(--primary-border)',
+                color: 'var(--status-good)',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                marginBottom: '10px'
+              }}>
+                {optimizationNote}
               </div>
             )}
 

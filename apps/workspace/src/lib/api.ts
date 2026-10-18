@@ -171,3 +171,21 @@ export async function verifyAuditLedger() {
   if (!res.ok) throw new Error('Audit verification request failed.');
   return await res.json();
 }
+
+// --- Real-Time Portal Latency & Health Probe ---
+export interface PortalHealthStatus {
+  url: string;
+  reachable: boolean;
+  statusCode?: number | null;
+  latencyMs: number;
+  congestion: 'fast' | 'congested' | 'unhealthy' | 'offline';
+  error?: string;
+  checkedAt: string;
+}
+
+export async function checkPortalHealth(portalUrl: string): Promise<PortalHealthStatus> {
+  const query = encodeURIComponent(portalUrl);
+  const res = await fetch(`${LOCAL_API_BASE}/portal/health?url=${query}`);
+  if (!res.ok) throw new Error('Portal health check failed.');
+  return await res.json();
+}

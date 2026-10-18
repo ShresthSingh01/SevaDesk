@@ -1,3 +1,6 @@
+import httpx
+import time
+from datetime import datetime, timezone
 from fastapi import APIRouter, UploadFile, File, Form, Response, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -200,3 +203,63 @@ def bridge_clear_session():
     """Clears the active bridge session once injected or canceled."""
     BridgeManager.clear_session()
     return {"status": "cleared"}
+
+# --- Real-Time Portal Latency & Health Probe ---
+@router.get("/portal/health")
+async def check_portal_health(url: str):
+    """
+    Measures real network latency and server responsiveness for government portals.
+    Empowers operators to detect 504 timeouts, server crashes, and slow peak hours before opening portal tabs.
+    """
+    norm_url = url.strip()
+    if not norm_url.startswith(("http://", "https://")):
+        norm_url = f"https://{norm_url}"
+
+    start = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=4.0, follow_redirects=True, verify=False) as client:
+            resp = await client.get(
+                norm_url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SevaDesk/2.0 Kiosk"}
+            )
+            elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
+
+            # Congestion classification
+            if resp.status_code < 400 and elapsed_ms < 800:
+                congestion = "fast"
+            elif resp.status_code < 500 and elapsed_ms < 3000:
+                congestion = "congested"
+            else:
+                congestion = "unhealthy"
+
+            return {
+                "url": norm_url,
+                "reachable": True,
+                "statusCode": resp.status_code,
+                "latencyMs": elapsed_ms,
+                "congestion": congestion,
+                "checkedAt": datetime.now(timezone.utc).isoformat()
+            }
+    except httpx.TimeoutException:
+        elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
+        return {
+            "url": norm_url,
+            "reachable": False,
+            "statusCode": 504,
+            "latencyMs": elapsed_ms,
+            "congestion": "unhealthy",
+            "error": "Gateway timeout: government portal server is unresponsive (> 4.0s).",
+            "checkedAt": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as exc:
+        elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
+        return {
+            "url": norm_url,
+            "reachable": False,
+            "statusCode": None,
+            "latencyMs": elapsed_ms,
+            "congestion": "offline",
+            "error": f"Portal connection failed: {str(exc)}",
+            "checkedAt": datetime.now(timezone.utc).isoformat()
+        }
+

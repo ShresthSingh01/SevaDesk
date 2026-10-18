@@ -323,18 +323,97 @@ async function fillMappedFields() {
 
   const tab = await currentTab();
   if (!tab?.id) return;
-  status('#fillResult', 'Populating reviewed fields…');
+  status('#fillResult', 'Burst-injecting reviewed fields…');
 
+  const t0 = performance.now();
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: fillOnCurrentPage,
       args: [map, state.activeAdapter?.fields || {}]
     });
+    const elapsed = Math.round(performance.now() - t0);
     const report = results?.[0]?.result || { filled: [], skipped: [] };
-    status('#fillResult', `Filled ${report.filled.length} field(s). Inspect every field on the live page before submitting.`, 'success');
+
+    // Save to quick re-inject cache
+    try {
+      if (chrome.storage?.local) {
+        chrome.storage.local.set({
+          lastInjectedSession: {
+            applicant: state.payload?.citizen?.displayName || 'Applicant',
+            payload: state.payload,
+            timestamp: Date.now(),
+            count: report.filled.length
+          }
+        });
+      }
+    } catch (e) {}
+
+    status('#fillResult', `⚡ Fast Burst: Injected ${report.filled.length} field(s) in ${elapsed}ms! Session active. Review before manual submission.`, 'success');
   } catch (err) {
     status('#fillResult', 'Could not fill page. Rescan and try again.', 'error');
+  }
+}
+
+// Injected into portal page: extracts visible error alerts
+function extractPageErrors() {
+  const errorElements = [...document.querySelectorAll(
+    '.error, .alert, .text-danger, .has-error, [role="alert"], #lblError, #errorMessage, .validation-summary-errors, .field-validation-error, span[id*="Error"], div[class*="error"], div[class*="alert"]'
+  )].filter(el => {
+    const style = getComputedStyle(el);
+    return el.innerText && el.innerText.trim().length > 3 && style.display !== 'none' && style.visibility !== 'hidden';
+  });
+  return errorElements.map(el => el.innerText.trim()).slice(0, 3);
+}
+
+async function inspectPortalErrors() {
+  const tab = await currentTab();
+  if (!tab?.id) return;
+  status('#pageStatus', 'Scanning portal page for active error messages…');
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: extractPageErrors
+    });
+    const foundErrors = results?.[0]?.result || [];
+    const container = $('#portalErrors');
+    if (!container) return;
+
+    if (!foundErrors.length) {
+      container.innerHTML = '<div class="status-note success" style="margin-top: 8px;">No visible error alerts found on active portal page.</div>';
+      status('#pageStatus', 'Inspection complete: no errors detected.');
+      return;
+    }
+
+    let html = '';
+    for (const msg of foundErrors) {
+      let analysis = null;
+      try {
+        const res = await fetch('http://127.0.0.1:8765/api/error-interpreter/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: msg })
+        });
+        if (res.ok) analysis = await res.json();
+      } catch (e) {}
+
+      html += `
+        <div class="error-item" style="margin-top: 8px; padding: 8px 10px; background: #fff5f5; border: 1px solid #feb2b2; border-radius: 6px; font-size: 0.78rem;">
+          <div style="font-weight: 700; color: #c53030; margin-bottom: 3px;">Detected: "${esc(msg)}"</div>
+          ${analysis ? `
+            <div style="color: #2d3748; line-height: 1.35;">
+              <strong>${esc(analysis.title || analysis.category)}:</strong> ${esc(analysis.explanation)}
+              <div style="margin-top: 4px; font-weight: 600; color: #2b6cb0;">Action: ${esc(analysis.action)}</div>
+            </div>
+          ` : `<div style="color: #718096;">Rule: Check field constraints and re-verify against source document.</div>`}
+        </div>
+      `;
+    }
+    container.innerHTML = html;
+    status('#pageStatus', `Detected ${foundErrors.length} portal error(s). Review recommendations below.`, 'warn');
+  } catch (err) {
+    status('#pageStatus', 'Could not inspect page for errors.', 'error');
   }
 }
 
@@ -350,7 +429,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   $('#scanPage')?.addEventListener('click', scanPortal);
   $('#rescanPage')?.addEventListener('click', scanPortal);
+  $('#scanErrors')?.addEventListener('click', inspectPortalErrors);
   $('#fillFields')?.addEventListener('click', fillMappedFields);
+
+  // Check for cached previous session
+  try {
+    if (chrome.storage?.local) {
+      chrome.storage.local.get(['lastInjectedSession'], data => {
+        const last = data?.lastInjectedSession;
+        if (last && last.payload && Date.now() - last.timestamp < 30 * 60 * 1000) {
+          const reinjectBtn = $('#reinjectPayload');
+          if (reinjectBtn) {
+            reinjectBtn.classList.remove('hidden');
+            reinjectBtn.textContent = `⚡ Restore Last Session (${last.applicant || 'Applicant'})`;
+            reinjectBtn.addEventListener('click', () => {
+              state.payload = last.payload;
+              status('#payloadStatus', `Restored previous session for ${last.applicant || 'applicant'}. Ready to inject.`, 'success');
+              $('#scanPage').disabled = false;
+              scanPortal();
+            });
+          }
+        }
+      });
+    }
+  } catch (e) {}
 
   // 1. Primary Direct Loopback IPC Bridge (Zero OS Clipboard PII Exposure)
   try {

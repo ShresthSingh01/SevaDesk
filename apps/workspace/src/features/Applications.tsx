@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Plus, Filter, ArrowRight, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Search, Plus, Filter, ArrowRight, CheckCircle2, AlertTriangle, Zap, Clock } from 'lucide-react';
 import { Application, Citizen, ServiceDefinition } from '@sevadesk/core-types';
 
 interface ApplicationsProps {
@@ -22,6 +22,8 @@ export const Applications: React.FC<ApplicationsProps> = ({
 
   const getCitizen = (citizenId: string) => citizens.find(c => c.id === citizenId);
   const getService = (serviceId: string) => services.find(s => s.id === serviceId);
+
+  const readyApps = applications.filter(app => app.status === 'ready');
 
   const filteredApps = applications.filter(app => {
     const c = getCitizen(app.citizenId);
@@ -56,6 +58,90 @@ export const Applications: React.FC<ApplicationsProps> = ({
           <Plus size={16} /> New application
         </button>
       </div>
+
+      {readyApps.length > 0 && (
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #1b4332 0%, #2d6a4f 100%)',
+            color: '#ffffff',
+            borderRadius: 'var(--radius-lg)',
+            padding: '18px 24px',
+            marginBottom: '24px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '16px',
+            boxShadow: 'var(--shadow-md)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', maxWidth: '680px' }}>
+            <div
+              style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(255, 255, 255, 0.15)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}
+            >
+              <Zap size={22} color="#95d5b2" />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <strong style={{ fontSize: '1rem', letterSpacing: '-0.01em' }}>
+                  Off-Peak Burst Submission Queue Active
+                </strong>
+                <span
+                  style={{
+                    backgroundColor: '#95d5b2',
+                    color: '#081c15',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: 'var(--radius-full)'
+                  }}
+                >
+                  {readyApps.length} Ready for Portal
+                </span>
+              </div>
+              <p style={{ fontSize: '0.825rem', opacity: 0.9, marginTop: '2px' }}>
+                Portals congested or timed out during the day? These cases have 100% preflight validation and citizen consent. Burst-submit them instantly via the Companion Extension once server traffic clears.
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <button
+              className="btn"
+              style={{
+                backgroundColor: statusFilter === 'ready' ? '#ffffff' : 'rgba(255, 255, 255, 0.2)',
+                color: statusFilter === 'ready' ? '#1b4332' : '#ffffff',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                fontSize: '0.8rem'
+              }}
+              onClick={() => setStatusFilter(statusFilter === 'ready' ? 'all' : 'ready')}
+            >
+              <Filter size={14} />
+              {statusFilter === 'ready' ? 'Showing Ready Queue' : 'View Ready Cases'}
+            </button>
+            <button
+              className="btn"
+              style={{
+                backgroundColor: '#95d5b2',
+                color: '#081c15',
+                fontSize: '0.8rem',
+                fontWeight: 700
+              }}
+              onClick={() => onOpenApplication(readyApps[0].id)}
+            >
+              Launch Next Ready Case <ArrowRight size={14} />
+            </button>
+          </div>
+        </div>
+      )}
 
       <section className="panel">
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>

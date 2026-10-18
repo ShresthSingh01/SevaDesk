@@ -197,3 +197,23 @@ def test_readback_speech_generation():
 
     en_text = bhashini_service.get_readback_speech_text("Ramesh Kumar", "1985-08-15", "411001", "••••••••0013", "en")
     assert "Identity verification" in en_text
+
+@pytest.mark.anyio
+async def test_portal_health_probe():
+    from app.api.routes import check_portal_health
+
+    # 1. Structure verification on any domain or loopback
+    res = await check_portal_health("https://example.com")
+    assert "url" in res
+    assert "reachable" in res
+    assert "latencyMs" in res
+    assert "congestion" in res
+    assert res["congestion"] in ["fast", "congested", "unhealthy", "offline"]
+    assert "checkedAt" in res
+
+    # 2. Unreachable domain handles gracefully without throwing unhandled exceptions
+    unreachable = await check_portal_health("https://non-existent-subdomain-99999.gov.in")
+    assert unreachable["reachable"] == False
+    assert unreachable["congestion"] == "offline"
+    assert "error" in unreachable
+
