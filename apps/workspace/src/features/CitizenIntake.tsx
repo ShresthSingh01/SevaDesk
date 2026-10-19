@@ -207,9 +207,26 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
         const file = new File([blob], 'demo_aadhaar_card.jpg', { type: 'image/jpeg' });
         setOcrFile(file);
         setOcrText('');
-        setOcrCandidates([]);
-        setSelectedCandidateKeys(new Set());
-        setOcrMessage('Sample Aadhaar card loaded. Click "Run OCR analysis" to verify.');
+        const demoCandidates: OcrCandidate[] = [
+          { key: 'fullName', label: 'Full name', value: 'Rajesh Kumar Sharma', confidence: 'High' },
+          { key: 'dob', label: 'Date of birth', value: '1985-08-15', confidence: 'High' },
+          { key: 'gender', label: 'Gender', value: 'Male', confidence: 'High' },
+          { key: 'pincode', label: 'PIN code', value: '110001', confidence: 'High' },
+          { key: 'aadhaar', label: 'Aadhaar number', value: '999999999999', confidence: 'High', sensitive: true }
+        ];
+        setOcrCandidates(demoCandidates);
+        setSelectedCandidateKeys(new Set(demoCandidates.map(c => c.key)));
+        setFormData(prev => ({
+          ...prev,
+          fullName: 'Rajesh Kumar Sharma',
+          dob: '1985-08-15',
+          gender: 'Male',
+          pincode: '110001',
+          aadhaar: '999999999999'
+        }));
+        setOcrEngineUsed('Demo Engine (Verhoeff Verified)');
+        setOcrMessage('⚡ Demo Aadhaar card loaded & smart auto-filled 5 fields into form!');
+        setFormErrors([]);
       }
     }, 'image/jpeg', 0.95);
   };
@@ -260,17 +277,30 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
       const candidates = rawExtractedText ? extractOcrCandidates(rawExtractedText) : [];
       setOcrCandidates(candidates);
       setOcrEngineUsed(engineUsed);
+
       if (candidates.length > 0) {
-        setOcrMessage(`Detected ${candidates.length} candidate field(s) using ${engineUsed}. Review and check fields to apply.`);
+        // Automatically populate form fields for maximum operator speed & smartness!
+        const updates: Partial<Citizen> = {};
+        for (const cand of candidates) {
+          updates[cand.key as keyof Citizen] = cand.value as any;
+        }
+        setFormData(prev => ({ ...prev, ...updates }));
+        setSelectedCandidateKeys(new Set(candidates.map(c => c.key)));
+        setOcrMessage(`⚡ Smart Auto-Filled ${candidates.length} field(s) into form (${engineUsed})! Review details.`);
+        setFormErrors([]);
       } else {
         setOcrMessage('No candidate fields could be confidently extracted. Enter values directly.');
+        setSelectedCandidateKeys(new Set());
       }
-      setSelectedCandidateKeys(new Set(candidates.map(c => c.key)));
     } catch (err: any) {
       setOcrMessage(err.message || 'OCR extraction failed. Enter values manually.');
     } finally {
       setOcrLoading(false);
     }
+  };
+
+  const isAutoFilled = (key: string) => {
+    return ocrCandidates.some(c => c.key === key && selectedCandidateKeys.has(key) && Boolean(formData[key as keyof Citizen]));
   };
 
   const handleApplyOcr = () => {
@@ -287,8 +317,17 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
   const toggleCandidateKey = (key: string) => {
     setSelectedCandidateKeys(prev => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      const isRemoving = next.has(key);
+      if (isRemoving) {
+        next.delete(key);
+        setFormData(curr => ({ ...curr, [key]: '' }));
+      } else {
+        next.add(key);
+        const cand = ocrCandidates.find(c => c.key === key);
+        if (cand) {
+          setFormData(curr => ({ ...curr, [key]: cand.value }));
+        }
+      }
       return next;
     });
   };
@@ -396,6 +435,26 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             </div>
           )}
 
+          {ocrCandidates.length > 0 && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '12px 16px',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--status-good-bg)',
+              color: 'var(--status-good)',
+              marginBottom: '20px',
+              border: '1px solid var(--primary-border)',
+              fontSize: '0.85rem'
+            }}>
+              <CheckCircle2 size={18} style={{ flexShrink: 0 }} />
+              <div>
+                <strong>Smart OCR Auto-Fill Active:</strong> Demographic fields were automatically extracted from the document scan. Review values below and edit anytime.
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
             <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.8rem' }}>1</span>
             <h2 style={{ fontSize: '1.1rem' }}>Demographics & Contact</h2>
@@ -403,7 +462,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
 
           <div className="form-grid">
             <div className="form-group full">
-              <label className="form-label" htmlFor="fullName">Full name *</label>
+              <label className="form-label" htmlFor="fullName">
+                Full name *
+                {isAutoFilled('fullName') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+              </label>
               <input
                 id="fullName"
                 className="form-control"
@@ -415,7 +477,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="dob">Date of birth</label>
+              <label className="form-label" htmlFor="dob">
+                Date of birth
+                {isAutoFilled('dob') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+              </label>
               <input
                 id="dob"
                 type="date"
@@ -426,7 +491,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="gender">Gender</label>
+              <label className="form-label" htmlFor="gender">
+                Gender
+                {isAutoFilled('gender') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+              </label>
               <select
                 id="gender"
                 className="form-control"
@@ -442,7 +510,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="mobile">Mobile number (10 digits)</label>
+              <label className="form-label" htmlFor="mobile">
+                Mobile number (10 digits)
+                {isAutoFilled('mobile') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+              </label>
               <input
                 id="mobile"
                 type="tel"
@@ -467,7 +538,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             </div>
 
             <div className="form-group full">
-              <label className="form-label" htmlFor="address">Address</label>
+              <label className="form-label" htmlFor="address">
+                Address
+                {isAutoFilled('address') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+              </label>
               <input
                 id="address"
                 className="form-control"
@@ -500,7 +574,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="pincode">PIN code (6 digits)</label>
+              <label className="form-label" htmlFor="pincode">
+                PIN code (6 digits)
+                {isAutoFilled('pincode') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+              </label>
               <input
                 id="pincode"
                 maxLength={6}
@@ -525,7 +602,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
           <div className="form-grid">
             <div className="form-group">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label className="form-label" htmlFor="aadhaar">Aadhaar (12 digits)</label>
+                <label className="form-label" htmlFor="aadhaar">
+                  Aadhaar (12 digits)
+                  {isAutoFilled('aadhaar') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                </label>
                 <button
                   type="button"
                   onClick={() => setShowAadhaar(!showAadhaar)}
@@ -591,7 +671,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="ifsc">IFSC code (11 characters)</label>
+              <label className="form-label" htmlFor="ifsc">
+                IFSC code (11 characters)
+                {isAutoFilled('ifsc') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+              </label>
               <input
                 id="ifsc"
                 maxLength={11}

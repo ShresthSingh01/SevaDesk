@@ -303,6 +303,18 @@ export function extractOcrCandidates(text = '') {
   };
 
   let name = pickLine(/^(?:name|applicant name|beneficiary name|नाम)\b\s*[:\-]?/i);
+  if (!name) {
+    const stopWords = ['government', 'india', 'unique', 'identification', 'authority', 'male', 'female', 'dob', 'birth', 'address', 'help', 'yojana', 'praman', 'patra', 'revenue', 'department', 'card', 'mera', 'aadhaar', 'meri', 'pehchan'];
+    for (const l of lines) {
+      const clean = l.replace(/[^\p{L}\p{M}\s]/gu, '').trim();
+      const words = clean.split(/\s+/).filter(Boolean);
+      const isHeader = words.some(w => stopWords.includes(w.toLowerCase()));
+      if (!isHeader && words.length >= 2 && words.length <= 4 && clean.length > 5 && clean.length < 45) {
+        name = clean;
+        break;
+      }
+    }
+  }
   if (name) {
     name = name.replace(/[^\p{L}\p{M} .'-]/gu, ' ').replace(/\s+/g, ' ').trim();
     if (name.length > 2 && name.length < 90) {
@@ -337,6 +349,12 @@ export function extractOcrCandidates(text = '') {
   if (aadhaar) {
     candidates.push({ key: 'aadhaar', label: FIELD_LABELS.aadhaar, value: aadhaar, confidence: 'Review', sensitive: true });
   }
+
+  const ifsc = raw.match(/\b([A-Za-z]{4}0[A-Za-z0-9]{6})\b/);
+  if (ifsc) candidates.push({ key: 'ifsc', label: FIELD_LABELS.ifsc, value: ifsc[1].toUpperCase(), confidence: 'Review' });
+
+  const addr = pickLine(/^(?:address|residential address|permanent address|पता)\b\s*[:\-]?/i);
+  if (addr && addr.length > 5) candidates.push({ key: 'address', label: FIELD_LABELS.address, value: addr, confidence: 'Review' });
 
   const genderLine = lines.find(line => /^(?:gender|sex|लिंग)\b/i.test(line));
   if (genderLine) {
