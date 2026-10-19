@@ -685,17 +685,23 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
               Aadhaar, Voter ID, PAN card, or Passbook scan
             </p>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
-              <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
-                <Upload size={14} /> Upload image
+              <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }} title="Upload image from computer or phone gallery">
+                <Upload size={14} /> Upload scan
                 <input type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+              </label>
+
+              <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }} title="Directly triggers the phone's native camera shutter on mobile devices">
+                <Camera size={14} /> Phone camera
+                <input type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display: 'none' }} />
               </label>
 
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={isCameraActive ? stopCamera : startCamera}
+                title="Uses laptop webcam or USB document camera"
               >
-                <Camera size={14} /> {isCameraActive ? 'Close Camera' : 'Scan via Webcam'}
+                <Camera size={14} /> {isCameraActive ? 'Close Camera' : 'Webcam / Scanner'}
               </button>
 
               <button
