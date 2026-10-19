@@ -24,6 +24,69 @@ import { CitizenDisplay } from './features/CitizenDisplay';
 import { ServicesRules } from './features/ServicesRules';
 import { AuditTrail } from './features/AuditTrail';
 
+export const DEFAULT_SERVICES: ServiceDefinition[] = [
+  {
+    id: 'srv-up-income',
+    name: 'Income Certificate (आय प्रमाण पत्र)',
+    department: 'Revenue Department / UP e-District',
+    portalUrl: 'https://edistrict.up.gov.in',
+    officialFee: 15,
+    operatorCharge: 30,
+    feeSourceUrl: 'https://edistrict.up.gov.in/edistrictup/FeeDetails.html',
+    feeVerifiedAt: new Date().toISOString(),
+    maxUploadMB: 0.1,
+    allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'pincode', 'rationCard'],
+    adapterId: 'edistrict-up',
+    notes: 'Official portal fee ₹15. Photo ≤ 20KB, self-declaration ≤ 100KB.'
+  },
+  {
+    id: 'srv-up-caste',
+    name: 'Caste Certificate (जाति प्रमाण पत्र)',
+    department: 'Revenue Department / UP e-District',
+    portalUrl: 'https://edistrict.up.gov.in',
+    officialFee: 15,
+    operatorCharge: 30,
+    feeSourceUrl: 'https://edistrict.up.gov.in/edistrictup/FeeDetails.html',
+    feeVerifiedAt: new Date().toISOString(),
+    maxUploadMB: 0.1,
+    allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'pincode', 'aadhaar'],
+    adapterId: 'edistrict-up',
+    notes: 'Official fee ₹15. Caste verification and self-declaration required.'
+  },
+  {
+    id: 'srv-parivahan-dl',
+    name: 'Learner License / Driving License (लर्नर लाइसेंस)',
+    department: 'Ministry of Road Transport & Highways / Sarathi',
+    portalUrl: 'https://sarathi.parivahan.gov.in',
+    officialFee: 200,
+    operatorCharge: 50,
+    feeSourceUrl: 'https://parivahan.gov.in/parivahan/en/content/fees-user-charges',
+    feeVerifiedAt: new Date().toISOString(),
+    maxUploadMB: 0.5,
+    allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'pincode', 'aadhaar'],
+    adapterId: 'parivahan-sarathi',
+    notes: 'Official fee ₹200. Age and address proofs required.'
+  },
+  {
+    id: 'srv-pm-kisan',
+    name: 'PM-Kisan Samman Nidhi eKYC & Registration',
+    department: 'Department of Agriculture & Farmers Welfare',
+    portalUrl: 'https://pmkisan.gov.in',
+    officialFee: 0,
+    operatorCharge: 20,
+    feeSourceUrl: 'https://pmkisan.gov.in',
+    feeVerifiedAt: new Date().toISOString(),
+    maxUploadMB: 2.0,
+    allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'aadhaar', 'bankAccount', 'ifsc', 'pincode'],
+    adapterId: 'pm-kisan',
+    notes: 'Official portal fee is FREE (₹0). Aadhaar-linked bank account required for DBT transfer.'
+  }
+];
+
 const VAULT_STORAGE_KEY = 'sevadesk.vault.v1';
 
 interface Toast {
@@ -161,7 +224,7 @@ export const App: React.FC = () => {
         schemaVersion: 1,
         profile: initialProfile,
         citizens: [],
-        services: [],
+        services: DEFAULT_SERVICES,
         applications: [],
         audit: [{
           id: `EVT-${Date.now().toString(36).toUpperCase()}`,
@@ -179,7 +242,7 @@ export const App: React.FC = () => {
       setVaultSalt(salt);
       setProfile(initialProfile);
       setCitizens([]);
-      setServices([]);
+      setServices(DEFAULT_SERVICES);
       setApplications([]);
       setAuditEvents(initialData.audit);
       setIsLocked(false);
@@ -191,7 +254,7 @@ export const App: React.FC = () => {
       setVaultSalt(salt);
       setProfile(data.profile || profile);
       setCitizens(data.citizens || []);
-      setServices(data.services || []);
+      setServices((data.services && data.services.length > 0) ? data.services : DEFAULT_SERVICES);
       setApplications(data.applications || []);
       setAuditEvents(data.audit || []);
       setIsLocked(false);
@@ -248,7 +311,7 @@ export const App: React.FC = () => {
     showToast('Audit CSV exported.');
   };
 
-  const handleSaveCitizen = async (citizen: Citizen) => {
+  const handleSaveCitizen = async (citizen: Citizen, targetServiceId?: string) => {
     const isEdit = citizens.some(c => c.id === citizen.id);
     if (isEdit) {
       setCitizens(prev => prev.map(c => (c.id === citizen.id ? citizen : c)));
@@ -261,8 +324,29 @@ export const App: React.FC = () => {
       syncCitizenToDaemon(citizen);
     }
     setEditingCitizenId(null);
-    setCurrentPage('overview');
-    showToast(isEdit ? 'Citizen record updated.' : 'Citizen record encrypted & saved.');
+
+    if (targetServiceId) {
+      const targetService = services.find(s => s.id === targetServiceId);
+      const newApp: Application = {
+        id: `SD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`,
+        citizenId: citizen.id,
+        serviceId: targetServiceId,
+        status: 'draft',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      setApplications(prev => [newApp, ...prev]);
+      if (daemonConnected) {
+        syncApplicationToDaemon(newApp);
+      }
+      addAuditEvent('application_created', `Application case launched directly from intake for ${targetService?.name || targetServiceId}.`, 'application', newApp.id);
+      setSelectedApplicationId(newApp.id);
+      setCurrentPage('applications');
+      showToast(`Saved citizen & launched application for ${targetService?.name?.split('(')[0].trim() || 'service'}!`);
+    } else {
+      setCurrentPage('overview');
+      showToast(isEdit ? 'Citizen record updated.' : 'Citizen record encrypted & saved.');
+    }
   };
 
   const handleSaveService = async (service: ServiceDefinition) => {
@@ -470,6 +554,7 @@ export const App: React.FC = () => {
           {currentPage === 'intake' && (
             <CitizenIntake
               initialCitizen={editingCitizen}
+              services={services}
               onSave={handleSaveCitizen}
               onCancel={() => {
                 setEditingCitizenId(null);

@@ -13,24 +13,33 @@ import {
   Volume2,
   VolumeX
 } from 'lucide-react';
-import { Citizen, OcrCandidate, extractOcrCandidates, maskIdentifier, validateCitizen } from '@sevadesk/core-types';
+import { Citizen, ServiceDefinition, OcrCandidate, extractOcrCandidates, maskIdentifier, validateCitizen } from '@sevadesk/core-types';
 import { requestOcrScan } from '../lib/api';
 import { playOcrReadbackSpeech, getOcrReadbackText } from '../lib/speech';
 import Tesseract from 'tesseract.js';
 
 interface CitizenIntakeProps {
   initialCitizen?: Citizen | null;
-  onSave: (citizen: Citizen) => Promise<void>;
+  services?: ServiceDefinition[];
+  onSave: (citizen: Citizen, targetServiceId?: string) => Promise<void>;
   onCancel: () => void;
   daemonConnected: boolean;
 }
 
 export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
   initialCitizen,
+  services = [],
   onSave,
   onCancel,
   daemonConnected
 }) => {
+  const [selectedServiceId, setSelectedServiceId] = useState<string>(services[0]?.id || '');
+  const selectedService = services.find(s => s.id === selectedServiceId);
+
+  const isFieldRequiredByService = (key: string) => {
+    return Boolean(selectedService?.requiredFields?.includes(key as any));
+  };
+
   const [formData, setFormData] = useState<Partial<Citizen>>(
     initialCitizen || {
       fullName: '',
@@ -424,7 +433,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
       updatedAt: now
     };
 
-    await onSave(citizenToSave);
+    await onSave(citizenToSave, selectedServiceId || undefined);
   };
 
   return (
@@ -433,16 +442,82 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
         <div>
           <div className="overline">
             <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--primary)' }} />
-            CITIZEN RECORD
+            CITIZEN RECORD & SERVICE APPLICATION
           </div>
-          <h1>{initialCitizen ? 'Update citizen record' : 'New citizen intake'}</h1>
+          <h1>{initialCitizen ? 'Update citizen record' : 'New citizen intake & service application'}</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '2px' }}>
-            Capture source details with citizen consent. Nothing is treated as verified until checked against the original document.
+            Select the government service, capture details via physical document OCR, and launch the application directly into portal handoff.
           </p>
         </div>
         <button className="btn btn-secondary" onClick={onCancel}>
           Cancel
         </button>
+      </div>
+
+      {/* Target Government Scheme / Service Selector Card */}
+      <div className="panel" style={{ marginBottom: '20px', padding: '16px 20px', borderLeft: '4px solid var(--primary)', backgroundColor: 'var(--bg-card)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+          <div style={{ flex: '1 1 320px' }}>
+            <label className="form-label" htmlFor="targetServiceSelect" style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span>🎯</span> Target Government Scheme / Service
+            </label>
+            <select
+              id="targetServiceSelect"
+              className="form-control"
+              value={selectedServiceId}
+              onChange={e => setSelectedServiceId(e.target.value)}
+              style={{ fontWeight: 600, fontSize: '0.9rem' }}
+            >
+              <option value="">Generic Citizen Intake (Save Record Only)</option>
+              {services.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.name} — {s.department || 'Govt Portal'}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {selectedService && (
+            <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: '0.75rem', lineHeight: '1.4' }}>
+                <div style={{ color: 'var(--text-muted)' }}>Official Portal</div>
+                <a
+                  href={selectedService.portalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: 'var(--primary)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                >
+                  {selectedService.portalUrl ? new URL(selectedService.portalUrl).hostname : 'Govt Portal'} ↗
+                </a>
+              </div>
+
+              <div style={{ fontSize: '0.75rem', lineHeight: '1.4' }}>
+                <div style={{ color: 'var(--text-muted)' }}>Transparent Fees</div>
+                <div style={{ fontWeight: 700, color: 'var(--status-good)' }}>
+                  Govt: ₹{selectedService.officialFee ?? 0} + CSC: ₹{selectedService.operatorCharge ?? 0} = ₹{(selectedService.officialFee || 0) + (selectedService.operatorCharge || 0)}
+                </div>
+              </div>
+
+              <div style={{ fontSize: '0.75rem', lineHeight: '1.4' }}>
+                <div style={{ color: 'var(--text-muted)' }}>Upload Limits</div>
+                <div style={{ fontWeight: 600 }}>
+                  Max {selectedService.maxUploadMB ? `${selectedService.maxUploadMB * 1024 < 1024 ? `${selectedService.maxUploadMB * 1024} KB` : `${selectedService.maxUploadMB} MB`}` : 'Standard'} ({selectedService.allowedExtensions?.join(', ') || 'pdf, jpg'})
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {selectedService && selectedService.requiredFields && selectedService.requiredFields.length > 0 && (
+          <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700, color: 'var(--text-muted)' }}>Required by {selectedService.name.split('(')[0].trim()}:</span>
+            {selectedService.requiredFields.map(rf => (
+              <span key={rf} className="status-pill warn" style={{ padding: '2px 8px', fontSize: '0.7rem' }}>
+                ★ {rf}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(360px, 1fr)', gap: '24px', alignItems: 'start' }}>
@@ -487,6 +562,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
               <label className="form-label" htmlFor="fullName">
                 Full name *
                 {isAutoFilled('fullName') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                {isFieldRequiredByService('fullName') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
               </label>
               <input
                 id="fullName"
@@ -502,6 +578,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
               <label className="form-label" htmlFor="dob">
                 Date of birth
                 {isAutoFilled('dob') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                {isFieldRequiredByService('dob') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
               </label>
               <input
                 id="dob"
@@ -516,6 +593,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
               <label className="form-label" htmlFor="gender">
                 Gender
                 {isAutoFilled('gender') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                {isFieldRequiredByService('gender') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
               </label>
               <select
                 id="gender"
@@ -535,6 +613,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
               <label className="form-label" htmlFor="mobile">
                 Mobile number (10 digits)
                 {isAutoFilled('mobile') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                {isFieldRequiredByService('mobile') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
               </label>
               <input
                 id="mobile"
@@ -563,6 +642,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
               <label className="form-label" htmlFor="address">
                 Address
                 {isAutoFilled('address') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                {isFieldRequiredByService('address') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
               </label>
               <input
                 id="address"
@@ -577,6 +657,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
               <label className="form-label" htmlFor="district">
                 District
                 {isAutoFilled('district') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                {isFieldRequiredByService('district') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
               </label>
               <input
                 id="district"
@@ -591,6 +672,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
               <label className="form-label" htmlFor="state">
                 State / UT
                 {isAutoFilled('state') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                {isFieldRequiredByService('state') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
               </label>
               <input
                 id="state"
@@ -605,6 +687,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
               <label className="form-label" htmlFor="pincode">
                 PIN code (6 digits)
                 {isAutoFilled('pincode') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                {isFieldRequiredByService('pincode') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
               </label>
               <input
                 id="pincode"
@@ -633,6 +716,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 <label className="form-label" htmlFor="aadhaar">
                   Aadhaar (12 digits)
                   {isAutoFilled('aadhaar') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                  {isFieldRequiredByService('aadhaar') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
                 </label>
                 <button
                   type="button"
@@ -666,7 +750,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="rationCard">Ration card number</label>
+              <label className="form-label" htmlFor="rationCard">
+                Ration card number
+                {isFieldRequiredByService('rationCard') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+              </label>
               <input
                 id="rationCard"
                 className="form-control"
@@ -678,7 +765,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
 
             <div className="form-group">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label className="form-label" htmlFor="bankAccount">Bank account number</label>
+                <label className="form-label" htmlFor="bankAccount">
+                  Bank account number
+                  {isFieldRequiredByService('bankAccount') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                </label>
                 <button
                   type="button"
                   onClick={() => setShowBank(!showBank)}
@@ -702,6 +792,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
               <label className="form-label" htmlFor="ifsc">
                 IFSC code (11 characters)
                 {isAutoFilled('ifsc') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                {isFieldRequiredByService('ifsc') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
               </label>
               <input
                 id="ifsc"
@@ -762,9 +853,19 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             <button type="button" className="btn btn-secondary" onClick={onCancel}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Save encrypted record <ArrowRight size={16} />
-            </button>
+            {selectedService ? (
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 20px', fontWeight: 700 }}
+              >
+                <span>⚡</span> Save & Proceed to Application Case ({selectedService.name.split('(')[0].trim()}) <ArrowRight size={16} />
+              </button>
+            ) : (
+              <button type="submit" className="btn btn-primary">
+                Save encrypted record <ArrowRight size={16} />
+              </button>
+            )}
           </div>
         </form>
 
