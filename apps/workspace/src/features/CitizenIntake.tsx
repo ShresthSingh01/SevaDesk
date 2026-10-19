@@ -44,54 +44,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
   const [isServicePickerOpen, setIsServicePickerOpen] = useState(false);
   const [showAllOptionalFields, setShowAllOptionalFields] = useState(false);
 
-  const selectedService = services.find(s => s.id === selectedServiceId);
-
-  const isFieldRequired = (key: keyof Citizen) => {
-    if (!selectedService) return false;
-    return Boolean(selectedService.requiredFields?.includes(key as any));
-  };
-
-  const isFieldRequiredByService = isFieldRequired;
-
-  const isFieldVisible = (key: keyof Citizen) => {
-    // If generic citizen intake (no service selected), show all fields
-    if (!selectedService) return true;
-    // If the field is explicitly required by this service, show it
-    if (isFieldRequired(key)) return true;
-    // If the field has a non-empty value (e.g. from OCR extraction or previous save), keep it visible
-    if (formData[key] && String(formData[key]).trim() !== '') return true;
-    // If operator clicked to show all optional fields, show it
-    if (showAllOptionalFields) return true;
-    // Otherwise, hide unwanted fields!
-    return false;
-  };
-
-  const SERVICE_CATEGORIES = ['All', 'UP e-District', 'Agriculture / DBT', 'Transport', 'Welfare & Health', 'Identity & Voter'];
-
-  const getServiceCategory = (s: ServiceDefinition) => {
-    if (s.id.startsWith('srv-up')) return 'UP e-District';
-    if (s.id.includes('parivahan') || s.id.includes('dl')) return 'Transport';
-    if (s.id.includes('kisan')) return 'Agriculture / DBT';
-    if (s.id.includes('voter') || s.id.includes('nvsp')) return 'Identity & Voter';
-    return 'Welfare & Health';
-  };
-
-  const filteredServices = services.filter(s => {
-    const q = serviceSearchQuery.toLowerCase().trim();
-    const matchesQuery = !q || 
-      s.name.toLowerCase().includes(q) || 
-      (s.department && s.department.toLowerCase().includes(q)) ||
-      (s.notes && s.notes.toLowerCase().includes(q));
-    if (!matchesQuery) return false;
-    if (serviceCategory === 'All') return true;
-    return getServiceCategory(s) === serviceCategory;
-  });
-
-  const allFieldKeys: (keyof Citizen)[] = [
-    'fullName', 'dob', 'gender', 'mobile', 'email', 'address', 'district', 'state', 'pincode', 'aadhaar', 'voterId', 'rationCard', 'bankAccount', 'ifsc'
-  ];
-  const hiddenFields = allFieldKeys.filter(k => !isFieldVisible(k));
-
   const [formData, setFormData] = useState<Partial<Citizen>>(
     initialCitizen || {
       fullName: '',
@@ -129,6 +81,65 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
   const [audioLang, setAudioLang] = useState('hi-IN');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [readbackVerified, setReadbackVerified] = useState(false);
+
+  const selectedService = services.find(s => s.id === selectedServiceId);
+
+  const getPortalHostname = (urlStr?: string) => {
+    if (!urlStr) return 'Govt Portal';
+    try {
+      return new URL(urlStr).hostname;
+    } catch {
+      return urlStr.replace(/^https?:\/\//, '').split('/')[0] || 'Govt Portal';
+    }
+  };
+
+  const getServiceCategory = (s?: ServiceDefinition) => {
+    if (!s || !s.id) return 'Welfare & Health';
+    if (s.id.startsWith('srv-up')) return 'UP e-District';
+    if (s.id.includes('parivahan') || s.id.includes('dl')) return 'Transport';
+    if (s.id.includes('kisan')) return 'Agriculture / DBT';
+    if (s.id.includes('voter') || s.id.includes('nvsp')) return 'Identity & Voter';
+    return 'Welfare & Health';
+  };
+
+  const isFieldRequired = (key: keyof Citizen) => {
+    if (!selectedService) return false;
+    return Boolean(selectedService.requiredFields?.includes(key as any));
+  };
+
+  const isFieldRequiredByService = isFieldRequired;
+
+  const isFieldVisible = (key: keyof Citizen) => {
+    // If generic citizen intake (no service selected), show all fields
+    if (!selectedService) return true;
+    // If the field is explicitly required by this service, show it
+    if (isFieldRequired(key)) return true;
+    // If the field has a non-empty value (e.g. from OCR extraction or previous save), keep it visible
+    if (formData[key] && String(formData[key]).trim() !== '') return true;
+    // If operator clicked to show all optional fields, show it
+    if (showAllOptionalFields) return true;
+    // Otherwise, hide unwanted fields!
+    return false;
+  };
+
+  const SERVICE_CATEGORIES = ['All', 'UP e-District', 'Agriculture / DBT', 'Transport', 'Welfare & Health', 'Identity & Voter'];
+
+  const filteredServices = services.filter(s => {
+    if (!s) return false;
+    const q = serviceSearchQuery.toLowerCase().trim();
+    const matchesQuery = !q || 
+      (s.name && s.name.toLowerCase().includes(q)) || 
+      (s.department && s.department.toLowerCase().includes(q)) ||
+      (s.notes && s.notes.toLowerCase().includes(q));
+    if (!matchesQuery) return false;
+    if (serviceCategory === 'All') return true;
+    return getServiceCategory(s) === serviceCategory;
+  });
+
+  const allFieldKeys: (keyof Citizen)[] = [
+    'fullName', 'dob', 'gender', 'mobile', 'email', 'address', 'district', 'state', 'pincode', 'aadhaar', 'voterId', 'rationCard', 'bankAccount', 'ifsc'
+  ];
+  const hiddenFields = allFieldKeys.filter(k => !isFieldVisible(k));
 
   const previewName = ocrCandidates.find(c => c.key === 'fullName')?.value || formData.fullName || 'नागरिक';
   const previewDob = ocrCandidates.find(c => c.key === 'dob')?.value || formData.dob;
@@ -533,7 +544,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                     rel="noreferrer"
                     style={{ color: 'var(--primary)', fontWeight: 600, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                   >
-                    {new URL(selectedService.portalUrl).hostname} ↗
+                    {getPortalHostname(selectedService.portalUrl)} ↗
                   </a>
                 )}
                 <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--status-good)' }}>
