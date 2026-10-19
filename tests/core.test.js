@@ -39,6 +39,51 @@ test('OCR candidate parser extracts review-only candidates and masks nothing sil
   assert.equal(candidates.find(x => x.key === 'mobile')?.value, '9876543210');
 });
 
+test('OCR candidate parser extracts real Aadhaar front with omitted name and gender prefixes', () => {
+  const aadhaarFront = `
+    भारत सरकार
+    GOVERNMENT OF INDIA
+    राजेश कुमार शर्मा
+    Rajesh Kumar Sharma
+    जन्म तिथि / DOB: 15/08/1985
+    पुरुष / MALE
+    9999 9999 9999
+  `;
+  const candidates = extractOcrCandidates(aadhaarFront);
+  assert.equal(candidates.find(x => x.key === 'fullName')?.value, 'Rajesh Kumar Sharma');
+  assert.equal(candidates.find(x => x.key === 'dob')?.value, '1985-08-15');
+  assert.equal(candidates.find(x => x.key === 'gender')?.value, 'Male');
+  assert.equal(candidates.find(x => x.key === 'aadhaar')?.value, '999999999999');
+});
+
+test('OCR candidate parser extracts PAN Card without confusing applicant with Father Name', () => {
+  const panCard = `
+    INCOME TAX DEPARTMENT
+    GOVT. OF INDIA
+    Name: AMIT VERMA
+    Father's Name: RAMESH VERMA
+    Date of Birth: 23/11/1988
+    Permanent Account Number: ABCDE1234F
+  `;
+  const candidates = extractOcrCandidates(panCard);
+  assert.equal(candidates.find(x => x.key === 'fullName')?.value, 'AMIT VERMA');
+  assert.equal(candidates.find(x => x.key === 'dob')?.value, '1988-11-23');
+  assert.equal(candidates.find(x => x.key === 'voterId')?.value, 'ABCDE1234F');
+});
+
+test('OCR candidate parser extracts multiline address, state and PIN code', () => {
+  const backCard = `
+    Address:
+    S/O Ramesh Sharma
+    H No 42, Civil Lines, Varanasi
+    Uttar Pradesh - 221001
+  `;
+  const candidates = extractOcrCandidates(backCard);
+  assert.ok(candidates.find(x => x.key === 'address')?.value.includes('Civil Lines'));
+  assert.equal(candidates.find(x => x.key === 'pincode')?.value, '221001');
+  assert.equal(candidates.find(x => x.key === 'state')?.value, 'Uttar Pradesh');
+});
+
 test('error interpreter clearly marks unknown messages rather than inventing a cause', () => {
   const known = interpretPortalError('File size exceeded limit');
   assert.equal(known.category, 'Document upload');

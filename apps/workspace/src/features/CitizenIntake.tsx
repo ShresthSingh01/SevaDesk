@@ -239,6 +239,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
     try {
       let rawExtractedText = ocrText;
       let engineUsed = 'Local-Heuristics';
+      let backendCandidates: OcrCandidate[] = [];
 
       if (ocrFile) {
         if (daemonConnected) {
@@ -247,6 +248,9 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             const result = await requestOcrScan(ocrFile, rawExtractedText);
             rawExtractedText = result.text || rawExtractedText;
             engineUsed = result.engine || 'Local-Core (PaddleOCR)';
+            if (result.candidates && Array.isArray(result.candidates) && result.candidates.length > 0) {
+              backendCandidates = result.candidates;
+            }
           } catch (daemonErr) {
             console.warn('Local core OCR error, trying browser Tesseract:', daemonErr);
           }
@@ -268,13 +272,31 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
               engineUsed = 'Tesseract-WASM (Local)';
             }
           } catch (tessErr) {
-            console.warn('Browser Tesseract WASM fallback error:', tessErr);
+            console.warn('Browser Tesseract WASM fallback error, trying English:', tessErr);
+            try {
+              const resEng = await Tesseract.recognize(ocrFile, 'eng');
+              if (resEng.data?.text && resEng.data.text.trim()) {
+                rawExtractedText = resEng.data.text;
+                engineUsed = 'Tesseract-WASM (eng)';
+              }
+            } catch (engErr) {
+              console.warn('Tesseract eng error:', engErr);
+            }
           }
         }
       }
 
       setOcrText(rawExtractedText || '');
-      const candidates = rawExtractedText ? extractOcrCandidates(rawExtractedText) : [];
+      const localCandidates = rawExtractedText ? extractOcrCandidates(rawExtractedText) : [];
+
+      // Combine both engine extractions so no field is missed
+      const combinedMap = new Map<string, OcrCandidate>();
+      for (const c of [...backendCandidates, ...localCandidates]) {
+        if (!combinedMap.has(c.key)) {
+          combinedMap.set(c.key, c as OcrCandidate);
+        }
+      }
+      const candidates = Array.from(combinedMap.values());
       setOcrCandidates(candidates);
       setOcrEngineUsed(engineUsed);
 
@@ -552,7 +574,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="district">District</label>
+              <label className="form-label" htmlFor="district">
+                District
+                {isAutoFilled('district') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+              </label>
               <input
                 id="district"
                 className="form-control"
@@ -563,7 +588,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="state">State / UT</label>
+              <label className="form-label" htmlFor="state">
+                State / UT
+                {isAutoFilled('state') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+              </label>
               <input
                 id="state"
                 className="form-control"

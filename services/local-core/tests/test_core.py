@@ -43,6 +43,38 @@ def test_ocr_candidate_parser():
     assert keys.get("ifsc") == "SBIN0001234"
     assert keys.get("gender") == "Male"
 
+def test_ocr_aadhaar_front_omitted_prefixes():
+    sample = """
+    भारत सरकार
+    GOVERNMENT OF INDIA
+    राजेश कुमार शर्मा
+    Rajesh Kumar Sharma
+    जन्म तिथि / DOB: 15/08/1985
+    पुरुष / MALE
+    2000 0000 0013
+    """
+    candidates = document_intelligence.extract_from_text(sample)
+    keys = {c.key: c.value for c in candidates}
+    assert keys.get("fullName") == "Rajesh Kumar Sharma"
+    assert keys.get("dob") == "1985-08-15"
+    assert keys.get("gender") == "Male"
+    assert keys.get("aadhaar") == "200000000013"
+
+def test_ocr_pan_card():
+    sample = """
+    INCOME TAX DEPARTMENT
+    GOVT. OF INDIA
+    Name: AMIT VERMA
+    Father's Name: RAMESH VERMA
+    Date of Birth: 23/11/1988
+    Permanent Account Number: ABCDE1234F
+    """
+    candidates = document_intelligence.extract_from_text(sample)
+    keys = {c.key: c.value for c in candidates}
+    assert keys.get("fullName") == "AMIT VERMA"
+    assert keys.get("dob") == "1988-11-23"
+    assert keys.get("voterId") == "ABCDE1234F"
+
 def test_preflight_validation():
     citizen = {
         "fullName": "Priya Patil",

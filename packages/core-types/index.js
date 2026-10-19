@@ -291,30 +291,118 @@ export function suggestFieldMatches(dataFields = {}, pageFields = []) {
   return suggestions;
 }
 
+const OCR_STOP_WORDS = new Set([
+  'government', 'india', 'govt', 'unique', 'identification', 'authority', 
+  'male', 'female', 'dob', 'birth', 'address', 'help', 'yojana', 'praman', 
+  'patra', 'revenue', 'department', 'card', 'mera', 'aadhaar', 'meri', 
+  'pehchan', 'income', 'tax', 'permanent', 'account', 'number', 'election', 
+  'commission', 'elector', 'photo', 'identity', 'signature', 'father', 
+  'mother', 'husband', 'uidai', 'enrollment', 'helpdesk', 'download', 'valid'
+]);
+
 export function extractOcrCandidates(text = '') {
   const raw = String(text || '').replace(/\r/g, '');
   const lines = raw.split('\n').map(line => line.trim()).filter(Boolean);
   const candidates = [];
-  const pickLine = regex => {
-    const line = lines.find(item => regex.test(item));
-    if (!line) return '';
-    const parts = line.split(/[:|]/);
-    return parts.length > 1 ? parts.slice(1).join(':').trim() : line.replace(regex, '').trim();
-  };
 
-  let name = pickLine(/^(?:name|applicant name|beneficiary name|नाम)\b\s*[:\-]?/i);
-  if (!name) {
-    const stopWords = ['government', 'india', 'unique', 'identification', 'authority', 'male', 'female', 'dob', 'birth', 'address', 'help', 'yojana', 'praman', 'patra', 'revenue', 'department', 'card', 'mera', 'aadhaar', 'meri', 'pehchan'];
-    for (const l of lines) {
-      const clean = l.replace(/[^\p{L}\p{M}\s]/gu, '').trim();
-      const words = clean.split(/\s+/).filter(Boolean);
-      const isHeader = words.some(w => stopWords.includes(w.toLowerCase()));
-      if (!isHeader && words.length >= 2 && words.length <= 4 && clean.length > 5 && clean.length < 45) {
-        name = clean;
+  // 1. Date of Birth (DD/MM/YYYY, YYYY-MM-DD, or DD-MM-YYYY, supporting spaces around separators)
+  let dobIso = '';
+  const explicitDobMatch = raw.match(/(?:dob|date of birth|birth date|जन्म तिथि|जन्मतारीख)\s*[:\-]?\s*(\d{1,2}\s*[\/\.-]\s*\d{1,2}\s*[\/\.-]\s*\d{4})/i);
+  const generalDobMatch = raw.match(/\b(0?[1-9]|[12]\d|3[01])\s*[\/\.-]\s*(0?[1-9]|1[012])\s*[\/\.-]\s*(19\d\d|20\d\d)\b/);
+  const rawDob = explicitDobMatch?.[1] || generalDobMatch?.[0] || '';
+
+  if (rawDob) {
+    const cleanDate = rawDob.replace(/\s+/g, '');
+    const parts = cleanDate.split(/[\/\.-]/).map(Number);
+    if (parts.length === 3) {
+      let [d, m, y] = parts;
+      if (d > 1900) {
+        [y, m, d] = parts;
+      }
+      if (y > 1900 && y <= 2026 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        dobIso = `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      }
+    }
+  } else {
+    // Year of birth fallback
+    const yobMatch = raw.match(/(?:year of birth|yob|जन्म का वर्ष)\s*[:\-]?\s*(19\d\d|20\d\d)\b/i);
+    if (yobMatch) {
+      dobIso = `${yobMatch[1]}-01-01`;
+    }
+  }
+
+  if (dobIso) {
+    candidates.push({ key: 'dob', label: FIELD_LABELS.dob, value: dobIso, confidence: 'Review' });
+  }
+
+  // 2. Gender (Multilingual English & Hindi, handles "Male / पुरुष", "MALE", "FEMALE", etc.)
+  let detectedGender = '';
+  for (const line of lines) {
+    if (/\b(?:male|female|transgender|पुरुष|महिला|स्त्री|तृतीयपंथी)\b/i.test(line)) {
+      if (/\bfemale|महिला|स्त्री\b/i.test(line)) {
+        detectedGender = 'Female';
+      } else if (/\bmale|पुरुष\b/i.test(line)) {
+        detectedGender = 'Male';
+      } else if (/\btransgender|तृतीयपंथी\b/i.test(line)) {
+        detectedGender = 'Transgender';
+      }
+      if (detectedGender) break;
+    }
+  }
+  if (detectedGender) {
+    candidates.push({ key: 'gender', label: FIELD_LABELS.gender, value: detectedGender, confidence: 'Review' });
+  }
+
+  // 3. Full Name
+  // Priority A: Explicit label (Name:, Applicant Name:, Elector's Name:, नाम:) - excludes father/mother/husband
+  let name = '';
+  for (const l of lines) {
+    if (/^(?:name|applicant name|beneficiary name|elector'?s? name|आवेदक का नाम|नाम)\b\s*[:\-]?/i.test(l)) {
+      if (!/father|mother|husband|पिता|पति/i.test(l)) {
+        const parts = l.split(/[:|]/);
+        name = parts.length > 1 ? parts.slice(1).join(':').trim() : l.replace(/^(?:name|applicant name|beneficiary name|elector'?s? name|आवेदक का नाम|नाम)\s*[:\-]?/i, '').trim();
         break;
       }
     }
   }
+
+  // Priority B: Position-based before DOB line (standard on 90% of Aadhaar and PAN cards)
+  if (!name && dobIso) {
+    let dobIdx = -1;
+    for (let idx = 0; idx < lines.length; idx++) {
+      const l = lines[idx];
+      if (/dob|birth|\d{4}/i.test(l) && dobIso.split('-').some(p => l.includes(p))) {
+        dobIdx = idx;
+        break;
+      }
+    }
+    if (dobIdx > 0) {
+      for (const offset of [1, 2]) {
+        if (dobIdx - offset >= 0) {
+          const candLine = lines[dobIdx - offset];
+          const clean = candLine.replace(/[^\p{L}\p{M}\s.'-]/gu, ' ').trim();
+          const words = clean.split(/\s+/).filter(w => !OCR_STOP_WORDS.has(w.toLowerCase()));
+          if (words.length >= 2 && words.length <= 4 && words.every(w => /^[\p{L}\p{M}]/u.test(w))) {
+            name = words.join(' ');
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Priority C: Scan for 2-4 capitalized words that are not headers or stop words
+  if (!name) {
+    for (const l of lines) {
+      const clean = l.replace(/[^\p{L}\p{M}\s.'-]/gu, ' ').trim();
+      const words = clean.split(/\s+/).filter(w => !OCR_STOP_WORDS.has(w.toLowerCase()));
+      if (words.length >= 2 && words.length <= 4 && words.every(w => w.length >= 2 && /^[A-Z\p{Lu}]/u.test(w))) {
+        name = words.join(' ');
+        break;
+      }
+    }
+  }
+
   if (name) {
     name = name.replace(/[^\p{L}\p{M} .'-]/gu, ' ').replace(/\s+/g, ' ').trim();
     if (name.length > 2 && name.length < 90) {
@@ -322,54 +410,94 @@ export function extractOcrCandidates(text = '') {
     }
   }
 
-  let dob = pickLine(/^(?:dob|date of birth|birth date|जन्म तिथि|जन्मतारीख)\b\s*[:\-]?/i);
-  if (!dob) {
-    const match = raw.match(/\b(\d{2}[\/.-]\d{2}[\/.-]\d{4}|\d{4}-\d{2}-\d{2})\b/);
-    dob = match?.[1] || '';
+  // 4. 6-digit Indian PIN code (100000 - 899999)
+  const pinMatch = raw.match(/(?:pin|pincode|pin code|postal code)?\s*[:\-]?\s*\b([1-8]\d{5})\b/i);
+  if (pinMatch) {
+    candidates.push({ key: 'pincode', label: FIELD_LABELS.pincode, value: pinMatch[1], confidence: 'Review' });
   }
-  if (dob) {
-    let iso = '';
-    const ymd = dob.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    const dmy = dob.match(/^(\d{2})[\/.-](\d{2})[\/.-](\d{4})$/);
-    if (ymd) iso = `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
-    else if (dmy) iso = `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
-    const date = iso ? new Date(`${iso}T00:00:00`) : null;
-    if (date && !Number.isNaN(date.getTime()) && date.getFullYear() > 1900 && date <= new Date()) {
-      candidates.push({ key: 'dob', label: FIELD_LABELS.dob, value: iso, confidence: 'Review' });
+
+  // 5. Indian Mobile Number (10 digits starting with 6-9)
+  const mobMatch = raw.match(/(?:(?:\+91|0)[\s-]?)?\b([6-9]\d{4}[\s-]?\d{5})\b/);
+  if (mobMatch) {
+    const cleanMob = mobMatch[1].replace(/\D/g, '');
+    if (cleanMob.length === 10) {
+      candidates.push({ key: 'mobile', label: FIELD_LABELS.mobile, value: cleanMob, confidence: 'Review' });
     }
   }
 
-  const pin = raw.match(/\b([1-8]\d{5})\b/);
-  if (pin) candidates.push({ key: 'pincode', label: FIELD_LABELS.pincode, value: pin[1], confidence: 'Review' });
-
-  const mobile = raw.match(/(?:\+91[\s-]?)?\b([6-9]\d{9})\b/);
-  if (mobile) candidates.push({ key: 'mobile', label: FIELD_LABELS.mobile, value: mobile[1], confidence: 'Review' });
-
-  const aadhaar = raw.match(/\b(?:\d[ -]?){12}\b/g)?.map(s => s.replace(/\D/g, '')).find(s => s.length === 12);
-  if (aadhaar) {
-    candidates.push({ key: 'aadhaar', label: FIELD_LABELS.aadhaar, value: aadhaar, confidence: 'Review', sensitive: true });
+  // 6. 12-digit Aadhaar number
+  const aadhaarMatches = raw.match(/\b(?:\d[\s-]?){12}\b/g);
+  if (aadhaarMatches) {
+    for (const cand of aadhaarMatches) {
+      const digits = cand.replace(/\D/g, '');
+      if (digits.length === 12) {
+        candidates.push({ key: 'aadhaar', label: FIELD_LABELS.aadhaar, value: digits, confidence: 'Review', sensitive: true });
+        break;
+      }
+    }
   }
 
-  const ifsc = raw.match(/\b([A-Za-z]{4}0[A-Za-z0-9]{6})\b/);
-  if (ifsc) candidates.push({ key: 'ifsc', label: FIELD_LABELS.ifsc, value: ifsc[1].toUpperCase(), confidence: 'Review' });
+  // 7. Voter ID / EPIC (3 letters + 7 digits)
+  const voterMatch = raw.match(/\b([A-Z]{3}[0-9]{7})\b/);
+  if (voterMatch) {
+    candidates.push({ key: 'voterId', label: FIELD_LABELS.voterId, value: voterMatch[1], confidence: 'Review' });
+  }
 
-  const addr = pickLine(/^(?:address|residential address|permanent address|पता)\b\s*[:\-]?/i);
-  if (addr && addr.length > 5) candidates.push({ key: 'address', label: FIELD_LABELS.address, value: addr, confidence: 'Review' });
+  // 8. PAN Card (5 letters, 4 digits, 1 letter)
+  const panMatch = raw.match(/\b([A-Z]{5}[0-9]{4}[A-Z])\b/);
+  if (panMatch && !candidates.some(c => c.key === 'voterId')) {
+    candidates.push({ key: 'voterId', label: 'PAN Card / Tax ID', value: panMatch[1], confidence: 'Review' });
+  }
 
-  const genderLine = lines.find(line => /^(?:gender|sex|लिंग)\b/i.test(line));
-  if (genderLine) {
-    const rawGender =
-      genderLine.split(/[:|]/).slice(1).join(':').trim() ||
-      genderLine.replace(/^(?:gender|sex|लिंग)\s*/i, '').trim();
-    const normalized = rawGender.toLowerCase();
-    const val = /female|महिला|स्त्री/i.test(normalized)
-      ? 'Female'
-      : /male|पुरुष/i.test(normalized)
-      ? 'Male'
-      : /transgender|trans/i.test(normalized)
-      ? 'Transgender'
-      : '';
-    if (val) candidates.push({ key: 'gender', label: FIELD_LABELS.gender, value: val, confidence: 'Review' });
+  // 9. IFSC Code
+  const ifscMatch = raw.match(/\b([A-Za-z]{4}0[A-Za-z0-9]{6})\b/);
+  if (ifscMatch) {
+    candidates.push({ key: 'ifsc', label: FIELD_LABELS.ifsc, value: ifscMatch[1].toUpperCase(), confidence: 'Review' });
+  }
+
+  // 10. Address (multiline capture from Address / S/O / C/O until PIN or Aadhaar)
+  const addrLines = [];
+  let inAddress = false;
+  for (const l of lines) {
+    if (/^(?:address|residential address|permanent address|पता|पत्ता|c\/o|s\/o|w\/o|d\/o)\b\s*[:\-]?/i.test(l)) {
+      inAddress = true;
+      const firstPart = l.replace(/^(?:address|residential address|permanent address|पता|पत्ता)\s*[:\-]?/i, '').trim();
+      if (firstPart) addrLines.push(firstPart);
+      continue;
+    }
+    if (inAddress) {
+      if (/\b(?:\d[\s-]?){12}\b|www\.|uidai|help@|1947/i.test(l)) break;
+      addrLines.push(l);
+      if (/\b[1-8]\d{5}\b/.test(l)) break;
+    }
+  }
+
+  if (addrLines.length > 0) {
+    const fullAddr = addrLines.map(p => p.trim().replace(/,+$/, '')).filter(Boolean).join(', ');
+    if (fullAddr.length > 5) {
+      candidates.push({ key: 'address', label: FIELD_LABELS.address, value: fullAddr, confidence: 'Review' });
+    }
+  }
+
+  // 11. State and District
+  const INDIAN_STATES = [
+    'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 
+    'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 
+    'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 
+    'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 
+    'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 
+    'Delhi', 'Jammu and Kashmir', 'Ladakh', 'Puducherry', 'Chandigarh'
+  ];
+  for (const st of INDIAN_STATES) {
+    if (new RegExp(`\\b${st}\\b`, 'i').test(raw)) {
+      candidates.push({ key: 'state', label: FIELD_LABELS.state, value: st, confidence: 'Review' });
+      break;
+    }
+  }
+
+  const distMatch = raw.match(/(?:district|dist|ज़िला|जिल्हा)\s*[:\-]?\s*([A-Za-z\u0900-\u097F]+)/i);
+  if (distMatch) {
+    candidates.push({ key: 'district', label: FIELD_LABELS.district, value: distMatch[1].trim(), confidence: 'Review' });
   }
 
   return candidates.filter((item, index, arr) => arr.findIndex(other => other.key === item.key) === index);
