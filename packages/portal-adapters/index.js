@@ -196,10 +196,53 @@ export const PORTAL_ADAPTERS = [
         required: false
       }
     },
-    disallowedSelectors: [
-      'input[type="password"]',
       '#txt_Captcha',
       '#btn_Submit'
+    ]
+  },
+  {
+    id: 'pm-kisan-v1',
+    name: 'PM-KISAN (Pradhan Mantri Kisan Samman Nidhi)',
+    state: 'Central / All States',
+    portalDomain: 'pmkisan.gov.in',
+    version: '1.0.0',
+    description: 'Farmer registration, e-KYC, and installment status portal.',
+    fields: {
+      aadhaar: {
+        targetSelector: '#txtAadharNo, #txtAadhar, #txtAadhaar, input[name*="Aadhar" i], input[name*="Aadhaar" i]',
+        fallbackSelectors: ['input[placeholder*="Aadhaar" i]', 'input[placeholder*="Aadhar" i]'],
+        transform: 'digits_only',
+        required: true
+      },
+      mobile: {
+        targetSelector: '#txtMobileNo, #txtMobile, input[name*="Mobile" i]',
+        fallbackSelectors: ['input[placeholder*="Mobile" i]', 'input[type="tel"]'],
+        transform: 'digits_only',
+        required: true
+      },
+      state: {
+        targetSelector: '#ddlState, select[name*="State" i]',
+        required: true
+      },
+      district: {
+        targetSelector: '#ddlDistrict, select[name*="District" i]',
+        required: true
+      },
+      bankAccount: {
+        targetSelector: '#txtAccountNo, input[name*="Account" i]',
+        required: false
+      },
+      ifsc: {
+        targetSelector: '#txtIFSC, input[name*="IFSC" i]',
+        transform: 'uppercase',
+        required: false
+      }
+    },
+    disallowedSelectors: [
+      '#txtCaptcha',
+      'input[name*="captcha" i]',
+      '#btnGetOTP',
+      'input[name*="otp" i]'
     ]
   },
   {

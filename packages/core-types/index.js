@@ -243,8 +243,14 @@ export const KEY_ALIASES = {
     'txt_mobile', 'txtmobileno', 'मोबाइल', 'मोबाइल नंबर'
   ],
   aadhaar: [
-    'aadhaar', 'aadhar', 'uid', 'uid number', 'aadhaar number', 'aadhaar no', 'aadhaar_no',
-    'masked aadhaar', 'txtaadhaar', 'आधार कार्ड', 'आधार'
+    'aadhaar', 'aadhar', 'adhar', 'uid', 'uidai', 'uid number', 'uid no', 'aadhaar number',
+    'aadhar number', 'adhar number', 'aadhaar no', 'aadhar no', 'adhar no', 'aadhaarno',
+    'aadharno', 'adharno', 'masked aadhaar', 'txtaadhaar', 'txtaadhar', 'txtadhar',
+    'txtaadhaarno', 'txtaadharno', 'txtadharno', 'txt_aadhaar', 'txt_aadhar', 'txt_adhar',
+    'txt_aadhaar_no', 'txt_aadhar_no', 'txt_adhar_no', 'txtuid', 'txt_uid', 'txtuidno',
+    'txt_uid_no', 'enter aadhaar', 'enter aadhar', 'enter adhar', 'enter aadhaar no',
+    'enter aadhar no', 'enter adhar no', 'aadhaar card', 'aadhar card', 'adhar card',
+    'आधार कार्ड', 'आधार', 'आधार नंबर', 'आधार क्रमांक', 'आधार संख्या'
   ],
   voterId: [
     'voter id', 'epic', 'epic number', 'voter card', 'elector photo identity card', 'voter_id',
@@ -291,9 +297,18 @@ export function tokenizeText(str = '') {
 export function scoreFieldMatch(dataKey, field = {}) {
   const rawCombined = [field.label, field.name, field.id, field.placeholder, field.autocomplete, field['aria-label']].filter(Boolean).join(' ');
   if (!rawCombined.trim()) return 0;
-  if (/captcha|one.?time.?password|\botp\b|verification.?code|security.?code|\bpassword\b|passcode|transaction.?pin/i.test(rawCombined)) {
+
+  // Never fill CAPTCHA or OTP challenges
+  if (/captcha|one.?time.?password|\botp\b|verification.?code|security.?code/i.test(rawCombined)) {
     return 0;
   }
+
+  // Check login passwords - but DO NOT reject if it's an Aadhaar or Bank account field!
+  const isAadhaarOrBank = /aadhaar|aadhar|adhar|\buid\b|uidai|bank[\s_-]?account|account[\s_-]?no|खाता/i.test(rawCombined);
+  if (!isAadhaarOrBank && /\bpassword\b|passcode|transaction.?pin/i.test(rawCombined)) {
+    return 0;
+  }
+
   const labelText = normalizeText(rawCombined);
   const tokenized = tokenizeText(rawCombined);
   if (!labelText && !tokenized) return 0;
@@ -309,11 +324,11 @@ export function scoreFieldMatch(dataKey, field = {}) {
       const aliasWords = alias.split(' ').filter(x => x.length > 1);
       const regex = new RegExp(`\\b${alias.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'i');
       if (regex.test(tokenized) || regex.test(labelText)) {
-        best = Math.max(best, 92);
+        best = Math.max(best, 95);
       } else if (labelText.includes(alias) || tokenized.includes(alias)) {
-        best = Math.max(best, 82);
+        best = Math.max(best, 85);
       } else if (aliasWords.length > 1 && aliasWords.every(w => tokenized.includes(w) || labelText.includes(w))) {
-        best = Math.max(best, 70 + Math.min(20, aliasWords.length * 5));
+        best = Math.max(best, 75 + Math.min(20, aliasWords.length * 5));
       }
     }
   }
@@ -326,6 +341,9 @@ export function scoreFieldMatch(dataKey, field = {}) {
   if (dataKey === 'gender' && Array.isArray(field.options) && field.options.length) {
     const hasGenderOpts = field.options.some(o => /^(male|female|other|transgender|पुरुष|महिला)$/i.test((o.label || o.value || '').trim()));
     if (hasGenderOpts) best = Math.max(best, 96);
+  }
+  if (dataKey === 'aadhaar' && isAadhaarOrBank) {
+    best = Math.max(best, 95);
   }
 
   return Math.min(100, best);

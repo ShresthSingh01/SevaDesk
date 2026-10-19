@@ -39,9 +39,44 @@ function scanCurrentForm(adapterRules = {}) {
     const rect = el.getBoundingClientRect();
     if (!rect.width || !rect.height || style.display === 'none' || style.visibility === 'hidden') return false;
     if (el.disabled || el.readOnly || el.type === 'hidden' || el.type === 'file') return false;
-    if (['password', 'checkbox', 'radio', 'submit', 'button', 'reset', 'image'].includes((el.type || '').toLowerCase())) return false;
+    if (['checkbox', 'radio', 'submit', 'button', 'reset', 'image'].includes((el.type || '').toLowerCase())) return false;
+
     const words = [el.name, el.id, el.placeholder, el.getAttribute('aria-label'), el.autocomplete].filter(Boolean).join(' ');
-    if (/captcha|one.?time.?password|\botp\b|verification.?code|security.?code|\bpassword\b|passcode|transaction.?pin/i.test(words)) return false;
+
+    // Never touch CAPTCHAs, OTPs, or verification codes
+    if (/captcha|one.?time.?password|\botp\b|verification.?code|security.?code/i.test(words)) return false;
+
+    // Check if element is an Aadhaar or Bank account input (which government portals often mask as type="password")
+    const isIdentityOrBank = /aadhaar|aadhar|adhar|\buid\b|uidai|account|bank|खाता/i.test(words);
+
+    // If it's type="password" and NOT an identity/bank field, check surrounding text/labels
+    if (el.type === 'password' && !isIdentityOrBank) {
+      const surroundingText = (
+        (el.parentElement?.innerText || '') + ' ' +
+        (el.parentElement?.previousElementSibling?.innerText || '') + ' ' +
+        (el.previousElementSibling?.innerText || '') + ' ' +
+        (el.closest('tr, .form-group, .row, .col, [class*="col-"], [class*="form-"]')?.innerText || '')
+      ).toLowerCase();
+
+      const surroundingMatchesIdentity = /aadhaar|aadhar|adhar|\buid\b|uidai|account|bank|खाता/.test(surroundingText);
+      if (!surroundingMatchesIdentity) {
+        return false; // Skip actual user login passwords!
+      }
+    }
+
+    // Exclude actual login passwords if not an Aadhaar or Bank field
+    if (!isIdentityOrBank && /\bpassword\b|passcode|transaction.?pin/i.test(words)) {
+      const surroundingText = (
+        (el.parentElement?.innerText || '') + ' ' +
+        (el.parentElement?.previousElementSibling?.innerText || '') + ' ' +
+        (el.previousElementSibling?.innerText || '') + ' ' +
+        (el.closest('tr, .form-group, .row, .col, [class*="col-"], [class*="form-"]')?.innerText || '')
+      ).toLowerCase();
+      if (!/aadhaar|aadhar|adhar|\buid\b|uidai|account|bank|खाता/.test(surroundingText)) {
+        return false;
+      }
+    }
+
     return true;
   });
 
@@ -79,16 +114,31 @@ function scanCurrentForm(adapterRules = {}) {
       }
     } catch (e) {}
 
-    // 5. Surrounding .form-group / .form-row / fieldset container
+    // 5. Direct previous sibling or parent's previous sibling (e.g. Bootstrap input-group with eye icon)
     try {
-      const group = el.closest('.form-group, .form-row, .row, .col, .field, fieldset, [class*="form-"]');
-      if (group) {
-        const glabel = group.querySelector('label, dt, th, .control-label, .form-label, span.label, legend');
-        if (glabel) labelTexts.push(glabel.innerText || glabel.textContent || '');
+      if (el.previousElementSibling) {
+        labelTexts.push(el.previousElementSibling.innerText || el.previousElementSibling.textContent || '');
+      }
+      if (el.parentElement && el.parentElement.previousElementSibling) {
+        labelTexts.push(el.parentElement.previousElementSibling.innerText || el.parentElement.previousElementSibling.textContent || '');
       }
     } catch (e) {}
 
-    // 6. Aria-label, placeholder, title, name, id
+    // 6. Surrounding .form-group / .form-row / column / fieldset container (Bootstrap & NIC portals)
+    try {
+      const container = el.closest('.form-group, .form-row, .row, .col, [class*="col-"], .field, fieldset, [class*="form-"], .input-field, .form-item, tr');
+      if (container) {
+        const labels = container.querySelectorAll('label, dt, th, .control-label, .form-label, span.label, span, strong, b, legend');
+        for (const l of labels) {
+          if (!l.contains(el)) {
+            const txt = (l.innerText || l.textContent || '').trim();
+            if (txt && txt.length < 80) labelTexts.push(txt);
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 7. Aria-label, placeholder, title, name, id
     if (el.getAttribute('aria-label')) labelTexts.push(el.getAttribute('aria-label'));
     if (el.placeholder) labelTexts.push(el.placeholder);
     if (el.title) labelTexts.push(el.title);
@@ -150,9 +200,21 @@ function fillOnCurrentPage(mappings, adapterRules) {
     const rect = el.getBoundingClientRect();
     if (!rect.width || !rect.height || style.display === 'none' || style.visibility === 'hidden') return false;
     if (el.disabled || el.readOnly || el.type === 'hidden' || el.type === 'file') return false;
-    if (['password', 'checkbox', 'radio', 'submit', 'button', 'reset', 'image'].includes((el.type || '').toLowerCase())) return false;
+    if (['checkbox', 'radio', 'submit', 'button', 'reset', 'image'].includes((el.type || '').toLowerCase())) return false;
     const words = [el.name, el.id, el.placeholder, el.getAttribute('aria-label')].filter(Boolean).join(' ');
-    if (/captcha|otp|password|pin/i.test(words)) return false;
+    if (/captcha|otp|verification/i.test(words)) return false;
+    const isIdentityOrBank = /aadhaar|aadhar|adhar|\buid\b|uidai|account|bank|खाता/i.test(words);
+    if (el.type === 'password' && !isIdentityOrBank) {
+      const surroundingText = (
+        (el.parentElement?.innerText || '') + ' ' +
+        (el.parentElement?.previousElementSibling?.innerText || '') + ' ' +
+        (el.previousElementSibling?.innerText || '') + ' ' +
+        (el.closest('tr, .form-group, .row, .col, [class*="col-"], [class*="form-"]')?.innerText || '')
+      ).toLowerCase();
+      if (!/aadhaar|aadhar|adhar|\buid\b|uidai|account|bank|खाता/.test(surroundingText)) {
+        return false;
+      }
+    }
     return true;
   });
 
@@ -177,9 +239,11 @@ function fillOnCurrentPage(mappings, adapterRules) {
 
     let val = String(map.value ?? '');
     const transform = adapterRules?.[map.key]?.transform;
-    if (transform === 'digits_only') val = val.replace(/\D/g, '');
-    else if (transform === 'uppercase') val = val.toUpperCase();
-    else if (transform === 'date_dmy') {
+    if (transform === 'digits_only' || map.key === 'aadhaar' || map.key === 'mobile' || map.key === 'pincode') {
+      val = val.replace(/\D/g, '');
+    } else if (transform === 'uppercase') {
+      val = val.toUpperCase();
+    } else if (transform === 'date_dmy') {
       const ymd = val.match(/^(\d{4})-(\d{2})-(\d{2})$/);
       if (ymd) val = `${ymd[3]}/${ymd[2]}/${ymd[1]}`;
     }

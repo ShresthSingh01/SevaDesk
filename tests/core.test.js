@@ -32,6 +32,22 @@ test('field matcher never suggests OTP/captcha and prioritizes exact labels', ()
   assert.ok(!suggestions[0].candidates.some(x => x.field.label.includes('Password')));
 });
 
+test('field matcher detects masked Aadhaar and PM-KISAN inputs while rejecting login passwords', () => {
+  const fields = [
+    { index: 0, label: 'Enter Aadhaar No :', name: 'txtAadharNo', type: 'password' },
+    { index: 1, label: 'Enter Mobile No :', name: 'txtMobileNo', type: 'text' },
+    { index: 2, label: 'Account Password', name: 'txtPassword', type: 'password' }
+  ];
+  const suggestions = suggestFieldMatches({ aadhaar: '999999999999', mobile: '9876543210' }, fields);
+  const aadhaarMatch = suggestions.find(x => x.key === 'aadhaar');
+  const mobileMatch = suggestions.find(x => x.key === 'mobile');
+
+  assert.equal(aadhaarMatch?.suggestedIndex, 0);
+  assert.ok(aadhaarMatch?.confidence >= 90);
+  assert.equal(mobileMatch?.suggestedIndex, 1);
+  assert.ok(!aadhaarMatch.candidates.some(c => c.field.name === 'txtPassword'));
+});
+
 test('OCR candidate parser extracts review-only candidates and masks nothing silently', () => {
   const candidates = extractOcrCandidates('Name: Asha Verma\nDOB: 12/04/1990\nMobile: 9876543210\n452001');
   assert.equal(candidates.find(x => x.key === 'fullName')?.value, 'Asha Verma');
