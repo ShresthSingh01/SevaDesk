@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Camera, 
   Upload, 
@@ -88,6 +88,10 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
     setFormData(prev => ({ ...prev, [field]: val }));
   };
 
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     setOcrFile(file);
@@ -95,6 +99,119 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
     setOcrCandidates([]);
     setSelectedCandidateKeys(new Set());
     setOcrMessage('');
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      streamRef.current = stream;
+      setIsCameraActive(true);
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      }, 100);
+    } catch {
+      alert('Could not access webcam/scanner. Please ensure camera permissions are allowed, or choose "Upload image" / "Demo Card".');
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsCameraActive(false);
+  };
+
+  const capturePhoto = () => {
+    if (!videoRef.current) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth || 1280;
+    canvas.height = videoRef.current.videoHeight || 720;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+      if (blob) {
+        const file = new File([blob], `id_camera_scan_${Date.now()}.jpg`, { type: 'image/jpeg' });
+        setOcrFile(file);
+        setOcrText('');
+        setOcrCandidates([]);
+        setSelectedCandidateKeys(new Set());
+        setOcrMessage('ID photo captured from camera. Click "Run OCR analysis" to extract details.');
+        stopCamera();
+      }
+    }, 'image/jpeg', 0.92);
+  };
+
+  const loadDemoCard = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1000;
+    canvas.height = 630;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Card background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Border
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#c8cfbf';
+    ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+
+    // Top tri-color stripe
+    ctx.fillStyle = '#ff9933';
+    ctx.fillRect(16, 16, canvas.width - 32, 16);
+    ctx.fillStyle = '#138808';
+    ctx.fillRect(16, 32, canvas.width - 32, 16);
+
+    // Header
+    ctx.fillStyle = '#1f2923';
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillText('Government of India / भारत सरकार', 240, 90);
+
+    // Photo box
+    ctx.fillStyle = '#e4e8dc';
+    ctx.fillRect(50, 130, 190, 240);
+    ctx.strokeStyle = '#87978d';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(50, 130, 190, 240);
+    ctx.fillStyle = '#5c6b62';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('CITIZEN PHOTO', 80, 255);
+
+    // Identity fields
+    ctx.fillStyle = '#1f2923';
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillText('Rajesh Kumar Sharma', 270, 170);
+    ctx.font = '22px sans-serif';
+    ctx.fillText('DOB: 15/08/1985', 270, 220);
+    ctx.fillText('Gender: Male / पुरुष', 270, 265);
+    ctx.fillText('PIN: 110001', 270, 310);
+
+    // Valid Verhoeff 12-digit number
+    ctx.fillStyle = '#c53030';
+    ctx.font = 'bold 36px monospace';
+    ctx.fillText('9999  9999  9999', 320, 480);
+
+    // Bottom banner
+    ctx.fillStyle = '#1b4332';
+    ctx.fillRect(16, canvas.height - 40, canvas.width - 32, 24);
+
+    canvas.toBlob(blob => {
+      if (blob) {
+        const file = new File([blob], 'demo_aadhaar_card.jpg', { type: 'image/jpeg' });
+        setOcrFile(file);
+        setOcrText('');
+        setOcrCandidates([]);
+        setSelectedCandidateKeys(new Set());
+        setOcrMessage('Sample Aadhaar card loaded. Click "Run OCR analysis" to verify.');
+      }
+    }, 'image/jpeg', 0.95);
   };
 
   const handleRunOcr = async () => {
@@ -565,15 +682,73 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             <Camera size={28} color="var(--primary)" style={{ margin: '0 auto 8px' }} />
             <strong style={{ display: 'block', fontSize: '0.875rem' }}>Upload or capture ID document</strong>
             <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
-              Aadhaar, Voter ID, PAN card, or Passbook image
+              Aadhaar, Voter ID, PAN card, or Passbook scan
             </p>
-            <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
-              <Upload size={14} /> Select image
-              <input type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
-            </label>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+                <Upload size={14} /> Upload image
+                <input type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+              </label>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={isCameraActive ? stopCamera : startCamera}
+              >
+                <Camera size={14} /> {isCameraActive ? 'Close Camera' : 'Scan via Webcam'}
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={loadDemoCard}
+                title="Generates a valid test Aadhaar document for instant testing"
+              >
+                <Sparkles size={14} /> Demo Card
+              </button>
+            </div>
+
+            {isCameraActive && (
+              <div style={{ marginTop: '16px', position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden', backgroundColor: '#000000' }}>
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  style={{ width: '100%', maxHeight: '220px', objectFit: 'cover', display: 'block' }}
+                />
+                <div style={{
+                  position: 'absolute',
+                  top: '12%',
+                  left: '12%',
+                  right: '12%',
+                  bottom: '12%',
+                  border: '2px dashed #52b788',
+                  borderRadius: '8px',
+                  boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.45)',
+                  pointerEvents: 'none',
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  justifyContent: 'center',
+                  paddingBottom: '6px'
+                }}>
+                  <span style={{ color: '#ffffff', fontSize: '0.7rem', backgroundColor: 'rgba(0,0,0,0.65)', padding: '2px 8px', borderRadius: '4px' }}>
+                    Hold ID card inside box
+                  </span>
+                </div>
+                <div style={{ padding: '8px', backgroundColor: '#111814', display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={capturePhoto}>
+                    <Camera size={14} /> Snap ID photo
+                  </button>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={stopCamera}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             {ocrFile && (
               <div style={{ fontSize: '0.75rem', color: 'var(--primary)', marginTop: '8px', fontWeight: 600 }}>
-                {ocrFile.name} ({(ocrFile.size / 1024).toFixed(1)} KB)
+                ✓ {ocrFile.name} ({(ocrFile.size / 1024).toFixed(1)} KB)
               </div>
             )}
 

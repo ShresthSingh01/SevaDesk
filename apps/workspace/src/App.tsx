@@ -343,6 +343,33 @@ export const App: React.FC = () => {
     showToast('New application record created.');
   };
 
+  // Standalone Dual-Screen Citizen Monitor Mode (?view=citizen)
+  const isCitizenMonitorView = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'citizen';
+  if (isCitizenMonitorView) {
+    const defaultCitizenService = services.find(s => s.id === selectedFeeServiceId) || services[0] || {
+      id: 'srv-income-demo',
+      name: 'Income Certificate (आय प्रमाण पत्र)',
+      department: 'Revenue Department / e-District',
+      officialFee: 50,
+      operatorCharge: 30,
+      feeSourceUrl: 'https://edistrict.up.gov.in',
+      feeVerifiedAt: new Date().toISOString(),
+      requiredFields: ['fullName', 'dob', 'mobile', 'pincode', 'aadhaar'],
+      maxUploadMB: 0.2,
+      allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+      portalUrl: 'https://edistrict.up.gov.in'
+    };
+    return (
+      <CitizenDisplay
+        service={defaultCitizenService}
+        onClose={() => {
+          window.location.href = window.location.pathname;
+        }}
+        daemonConnected={daemonConnected}
+      />
+    );
+  }
+
   if (isLocked) {
     return (
       <LockScreen
