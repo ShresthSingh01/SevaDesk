@@ -37,7 +37,7 @@ echo ----------------------------------------------------------------------
 echo  Operator Workspace:  http://localhost:5173
 echo  Citizen Display:     http://localhost:5173 (Select Citizen Display mode)
 echo  Local API Docs:      http://127.0.0.1:8765/docs
-echo  Browser Extension:   Load unpacked from d:\SevaDesk\apps\extension
+echo  Browser Extension:   Load unpacked from %~dp0apps\extension
 echo ----------------------------------------------------------------------
 echo.
 

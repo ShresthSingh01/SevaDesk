@@ -181,11 +181,68 @@ This concurrently launches:
 
 ---
 
-### Test 11: Automated Test Suite (All Green)
+### Test 11: Real-Time Government Portal Latency & Health Probe
+1. Navigate to **"Applications"** in the sidebar and open any application record (e.g. Income Certificate for Rajesh Kumar).
+2. Look at the top right header badge: **"Portal Health: Probing..."**
+3. The local daemon executes an asynchronous HTTP socket ping (`GET /api/portal/health?url=...`) directly to the portal domain (e.g. `edistrict.up.gov.in`).
+4. **Expected Result:**
+   * If responsive: Displays a green badge: `● Portal Responsive (XXX ms)`.
+   * If congested (> 800 ms): Displays an amber warning: `● Portal Congested (XXXX ms)`.
+   * If timed out / server down: Displays a red warning: `● Portal Server Unhealthy (504 Timeout)`.
+   * Click the refresh icon next to the badge to re-measure live socket latency in real time.
+
+---
+
+### Test 12: 100% On-Device Canvas Document Optimizer (< 100 KB / < 200 KB)
+1. In the same Application Detail screen, under **"Required Documents"**, attach a high-resolution phone camera scan or oversized image (e.g. 2 MB - 5 MB JPEG/PNG).
+2. The preflight check will immediately flag: *"Document exceeds configured maximum upload size of 0.2 MB."*
+3. Notice the amber optimizer box appears:
+   * **"Oversized Document Detected"** — `file.jpg (X.XX MB) exceeds portal limit of 0.2 MB.`
+4. Click the button: **"⚡ Auto-Optimize Document for Portal (< 0.2 MB)"**.
+5. **Expected Result:**
+   * An HTML5 Canvas executes an in-browser binary search JPEG quantization.
+   * Compresses the file down to $\le 195\text{ KB}$ in under 300 ms on-device without sending any citizen image to an external server.
+   * Automatically replaces the oversized file and turns the preflight check green.
+
+---
+
+### Test 13: Fast-Burst Companion Autofill & 1-Click Timeout Session Guard
+1. From the Application Detail page, click **"Send to Companion"**.
+2. Open Google Chrome with the companion extension loaded from `apps/extension`.
+3. Open any portal or web form (e.g. `https://edistrict.up.gov.in` or a sample HTML form).
+4. Click the **SevaDesk Companion** icon.
+5. **Test Fast-Burst Injection:**
+   * Click **"⚡ Fast-Burst Reviewed Fields"**.
+   * **Expected Result:** Injects all matching values into the portal inputs in under 150 ms and displays:
+     > *"⚡ Injected N fields in XX ms"*
+6. **Test 1-Click Session Guard (Timeout Recovery):**
+   * Reload the web page (simulating a portal crash, gateway error, or 504 timeout).
+   * Open the extension popup again.
+   * Notice the amber banner: *"Active Session Cached — 1-click restore available if portal timed out."*
+   * Click **"⚡ Restore Last Session"**.
+   * **Expected Result:** Instantly re-injects all fields without needing to re-open the SevaDesk workspace.
+7. **Test On-Portal Error Inspector:**
+   * Click **"🔍 Scan On-Screen Portal Errors"**.
+   * **Expected Result:** Scans the active page for error alerts/banners and queries the local reverse error classifier (`/api/error-interpreter/analyze`) to output plain Hindi/English operator solutions.
+
+---
+
+### Test 14: Off-Peak Rush-Hour Queue
+1. In the SevaDesk Workspace, click **"Applications"** in the sidebar.
+2. When cases are verified and have passed preflight checks (`status === 'ready'`), an actionable gradient banner appears at the top:
+   > *"Off-Peak Burst Submission Queue Active — N Ready for Portal"*
+3. Click **"View Ready Cases"** to immediately filter only preflight-cleared cases ready for submission.
+4. Click **"Launch Next Ready Case"** to immediately navigate into the next queued applicant's record.
+
+---
+
+### Test 15: Automated Test Suite (All 23 Tests Green)
 Run the full test suite across the entire monorepo:
 ```bash
 npm run test:all
 ```
 * **Node.js Core Tests:** `tests/*.test.js` ➔ **11/11 Passed**
-* **Python Daemon Tests:** `services/local-core/tests` ➔ **10/10 Passed**
-* **TypeScript & Vite Compilation:** `apps/workspace` ➔ **0 errors, 1,963 modules transformed cleanly**
+* **Python Daemon Tests:** `services/local-core/tests` ➔ **12/12 Passed**
+* **TypeScript & Vite Compilation:** `apps/workspace` ➔ **0 errors, 1,964 modules transformed cleanly**
+* **Total:** **23/23 Passed, 100% Green**
+

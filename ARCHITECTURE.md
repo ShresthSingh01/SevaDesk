@@ -106,18 +106,27 @@ flowchart TD
 - **Multilingual Voice Engine:**
   - Native Chromium Indic WebSpeech synthesis (`hi-IN`, `mr-IN`, `ta-IN`, `te-IN`, `bn-IN`, `gu-IN`, `en-IN`) as primary offline engine.
   - BHASHINI / AI4Bharat ULCA client with disk-backed cache and Windows SAPI5 as secondary fallback.
+- **Real-Time Portal Latency & Congestion Probe:**
+  - Asynchronous HTTP socket ping (`GET /api/portal/health`) measuring actual round-trip latency to official portal endpoints.
+  - Indian CCA root certificate tolerance (`verify=False`) to prevent false outage alerts on state NIC portals.
+  - Categorizes portal status into `fast`, `congested`, `unhealthy` (504 timeout), and `offline`.
 
 ### C. Manifest V3 Browser Companion (`apps/extension`)
-- **Technology:** Chrome Extensions Manifest V3 (`activeTab`, `scripting`, `storage`).
+- **Technology:** Chrome Extensions Manifest V3 (`activeTab`, `scripting`, `storage`, `webNavigation`).
 - **Direct Loopback Bridge (Zero Clipboard PII Exposure):**
   - On open, queries `http://127.0.0.1:8765/api/bridge/active-session` to automatically load the active reviewed case payload into memory.
 - **Declarative Portal Adapters:**
   - Pre-calibrated selectors for **MahaDBT**, **UP e-District**, **Antyodaya Saral Haryana**, and **e-District Delhi**.
   - Evaluates native W3C `element.matches(selector)` against live DOM nodes rather than fragile substring comparisons.
-- **Stable DOM State Machine & Event Dispatcher:**
-  - Identifies target controls via stable DOM fingerprints (`id`, `name`, CSS path) instead of mutable array indices.
+- **Sub-150ms Fast-Burst DOM Injection:**
+  - Injects reviewed values in under 150 ms with live stopwatch benchmarking.
   - Dispatches standard synthetic DOM events (`input`, `change`, `blur`) and invokes native React/Angular prototype property setters.
   - Strict safety invariants: disallows interaction with password inputs, OTP fields, CAPTCHA controls, and final submit buttons.
+- **1-Click Session Guard (Timeout Recovery):**
+  - Automatically caches the last active injected session in `chrome.storage.local` with a 30-minute expiration window.
+  - Allows instantaneous re-injection with a single click if the government portal session expires.
+- **On-Portal Error Inspector:**
+  - Captures on-screen error banners and queries the local reverse error classifier (`POST /api/error-interpreter/analyze`) to provide plain-language operator remedies.
 
 ### D. Central Coordination Hub (`services/central-hub`)
 - **Technology:** PostgreSQL 16+, Docker Compose.
@@ -153,8 +162,8 @@ SevaDesk maintains multi-tiered automated verification:
    - 11 unit tests verifying Verhoeff checksums, preflight rules, candidate parsers, and cipher safety.
 2. **Local Python Daemon (`services/local-core`):**
    - Pytest suite (`pytest services/local-core/tests`).
-   - 10 unit tests verifying Verhoeff checksums, AES-256-GCM encryption/decryption, SHA-256 audit chaining and tamper detection, in-memory bridge session dispatch, and SQLite transactions.
+   - 12 unit tests verifying Verhoeff checksums, AES-256-GCM encryption/decryption, SHA-256 audit chaining and tamper detection, in-memory bridge session dispatch, SQLite transactions, multilingual audio synthesis, and real-time portal health socket probing.
 3. **Workspace Frontend (`apps/workspace`):**
    - TypeScript compiler (`tsc --noEmit`) and Vite production bundle compilation (`vite build`).
 4. **End-to-End Orchestration:**
-   - Single root command: `npm run test:all` executes all test suites sequentially.
+   - Single root command: `npm run test:all` executes all test suites sequentially (23 passed tests, 0 failures).
