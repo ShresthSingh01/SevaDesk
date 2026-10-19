@@ -34,42 +34,107 @@ export function onlyDigits(value = '') {
 }
 
 export const KEY_ALIASES = {
-  fullName: ['name', 'full name', 'applicant name', 'beneficiary name', 'candidate name', 'first name', 'surname', 'आवेदक का नाम', 'नाव'],
-  dob: ['date of birth', 'dob', 'birth date', 'birthdate', 'जन्म तिथि', 'जन्मतारीख'],
-  gender: ['gender', 'sex', 'लिंग'],
-  mobile: ['mobile', 'mobile number', 'phone', 'phone number', 'contact number', 'registered mobile', 'मोबाइल नंबर'],
-  aadhaar: ['aadhaar', 'aadhar', 'uid', 'uid number', 'aadhaar number', 'आधार कार्ड', 'आधार'],
-  voterId: ['voter id', 'epic', 'epic number', 'elector photo identity card', 'मतदाता पहचान पत्र'],
-  rationCard: ['ration card', 'ration card number', 'family id', 'राशन कार्ड'],
-  address: ['address', 'residential address', 'permanent address', 'current address', 'पता', 'पत्ता'],
-  state: ['state', 'state name', 'राज्य'],
-  district: ['district', 'district name', 'जिला', 'जिल्हा'],
-  pincode: ['pin code', 'pincode', 'postal code', 'zip code', 'पिन कोड'],
-  bankAccount: ['bank account', 'account number', 'bank account number', 'खाता संख्या'],
-  ifsc: ['ifsc', 'ifsc code', 'branch ifsc', 'आईएफएससी कोड'],
-  email: ['email', 'email address', 'e mail', 'ईमेल']
+  fullName: [
+    'name', 'full name', 'applicant name', 'citizen name', 'beneficiary name', 'candidate name',
+    'first name', 'student name', 'holder name', 'person name', 'fname', 'c_name', 'txtname',
+    'txtapplicantname', 'applicant_name', 'beneficiary_name', 'आवेदक का नाम', 'नाम', 'नाव'
+  ],
+  dob: [
+    'date of birth', 'dob', 'birth date', 'birthdate', 'date_of_birth', 'birth_date', 'txtdob',
+    'txt_dob', 'd_o_b', 'birthyear', 'year of birth', 'जन्म तिथि', 'जन्मतारीख'
+  ],
+  gender: ['gender', 'sex', 'ddlgender', 'selgender', 'txtgender', 'लिंग'],
+  mobile: [
+    'mobile', 'mobile number', 'mobile no', 'phone', 'phone number', 'contact', 'contact number',
+    'contact no', 'cell', 'registered mobile', 'mobile_no', 'mobile_number', 'txtmobile',
+    'txt_mobile', 'txtmobileno', 'मोबाइल', 'मोबाइल नंबर'
+  ],
+  aadhaar: [
+    'aadhaar', 'aadhar', 'uid', 'uid number', 'aadhaar number', 'aadhaar no', 'aadhaar_no',
+    'masked aadhaar', 'txtaadhaar', 'आधार कार्ड', 'आधार'
+  ],
+  voterId: [
+    'voter id', 'epic', 'epic number', 'voter card', 'elector photo identity card', 'voter_id',
+    'epic_no', 'txtepic', 'मतदाता पहचान पत्र'
+  ],
+  rationCard: [
+    'ration card', 'ration card number', 'ration_card', 'family id', 'family_id', 'bpl card',
+    'txtrationcard', 'राशन कार्ड'
+  ],
+  address: [
+    'address', 'residential address', 'permanent address', 'current address', 'correspondence address',
+    'communication address', 'street', 'house no', 'address line 1', 'address1', 'txtaddress',
+    'txt_address', 'पता', 'पत्ता'
+  ],
+  state: ['state', 'state name', 'rajya', 'state_id', 'state_name', 'ddlstate', 'selstate', 'राज्य'],
+  district: [
+    'district', 'district name', 'zila', 'ddldistrict', 'seldistrict', 'district_id', 'district_name',
+    'districtcode', 'txtdistrict', 'जिला', 'जिल्हा'
+  ],
+  pincode: [
+    'pin code', 'pincode', 'pin', 'postal code', 'zip code', 'txtpin', 'txtpincode', 'pin_code',
+    'postalcode', 'पिन कोड'
+  ],
+  bankAccount: [
+    'bank account', 'account number', 'account no', 'account_no', 'bank account number', 'acc no',
+    'bank_account', 'txtaccountno', 'खाता संख्या'
+  ],
+  ifsc: ['ifsc', 'ifsc code', 'branch ifsc', 'ifsc_code', 'txtifsc', 'आईएफएससी कोड'],
+  email: ['email', 'email address', 'email id', 'e mail', 'email_id', 'emailid', 'txtemail', 'ईमेल']
 };
 
+export function tokenizeText(str = '') {
+  return String(str || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/ctl\d+[\$_]?/gi, ' ')
+    .replace(/[_\-\.\$\:\/\\\[\]]/g, ' ')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\u0900-\u097f]+/g, ' ')
+    .trim();
+}
+
 export function scoreFieldMatch(dataKey, field = {}) {
-  const labelText = normalizeText(
-    [field.label, field.name, field.id, field.placeholder, field.autocomplete, field['aria-label']].filter(Boolean).join(' ')
-  );
-  if (!labelText) return 0;
-  if (/captcha|one time password|otp|verification code|security code|password|passcode|transaction pin/i.test(labelText)) {
+  const rawCombined = [field.label, field.name, field.id, field.placeholder, field.autocomplete, field['aria-label']].filter(Boolean).join(' ');
+  if (!rawCombined.trim()) return 0;
+  if (/captcha|one.?time.?password|\botp\b|verification.?code|security.?code|\bpassword\b|passcode|transaction.?pin/i.test(rawCombined)) {
     return 0;
   }
+  const labelText = normalizeText(rawCombined);
+  const tokenized = tokenizeText(rawCombined);
+  if (!labelText && !tokenized) return 0;
+
   const key = normalizeText(dataKey);
   const aliases = [key, ...(KEY_ALIASES[dataKey] || [])].map(normalizeText).filter(Boolean);
   let best = 0;
+
   for (const alias of aliases) {
-    if (labelText === alias) best = Math.max(best, 100);
-    else if (labelText.includes(alias) || alias.includes(labelText)) best = Math.max(best, 78);
-    const parts = alias.split(' ').filter(x => x.length > 2);
-    if (parts.length && parts.every(p => labelText.includes(p))) best = Math.max(best, 65 + parts.length * 4);
+    if (labelText === alias || tokenized === alias) {
+      best = Math.max(best, 100);
+    } else {
+      const aliasWords = alias.split(' ').filter(x => x.length > 1);
+      const regex = new RegExp(`\\b${alias.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'i');
+      if (regex.test(tokenized) || regex.test(labelText)) {
+        best = Math.max(best, 92);
+      } else if (labelText.includes(alias) || tokenized.includes(alias)) {
+        best = Math.max(best, 82);
+      } else if (aliasWords.length > 1 && aliasWords.every(w => tokenized.includes(w) || labelText.includes(w))) {
+        best = Math.max(best, 70 + Math.min(20, aliasWords.length * 5));
+      }
+    }
   }
-  if (dataKey === 'dob' && field.type === 'date') best = Math.max(best, 82);
-  if (dataKey === 'mobile' && field.type === 'tel') best = Math.max(best, 70);
-  if (dataKey === 'email' && field.type === 'email') best = Math.max(best, 78);
+
+  // Type & Option bonuses
+  if (dataKey === 'dob' && field.type === 'date') best = Math.max(best, 88);
+  if (dataKey === 'mobile' && field.type === 'tel') best = Math.max(best, 85);
+  if (dataKey === 'email' && field.type === 'email') best = Math.max(best, 88);
+  if (dataKey === 'address' && field.type === 'textarea') best = Math.max(best, 78);
+  if (dataKey === 'gender' && Array.isArray(field.options) && field.options.length) {
+    const hasGenderOpts = field.options.some(o => /^(male|female|other|transgender|पुरुष|महिला)$/i.test((o.label || o.value || '').trim()));
+    if (hasGenderOpts) best = Math.max(best, 96);
+  }
+
   return Math.min(100, best);
 }
 
@@ -83,7 +148,7 @@ export function suggestFieldMatches(dataFields = {}, pageFields = []) {
         index: Number.isInteger(field.index) ? field.index : index,
         score: scoreFieldMatch(key, field)
       }))
-      .filter(item => item.score >= 55)
+      .filter(item => item.score >= 40)
       .sort((a, b) => b.score - a.score);
 
     suggestions.push({

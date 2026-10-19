@@ -7,73 +7,116 @@
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
+  <!-- Brand Header -->
   <header class="brandbar">
-    <div class="mark">S</div>
-    <div><strong>SevaDesk</strong><span>Browser companion v2.0</span></div>
-    <span class="privacy-pill">ACTIVE TAB ONLY</span>
+    <div class="brand-left">
+      <div class="mark">S</div>
+      <div>
+        <strong>SevaDesk</strong>
+        <span class="subversion">Companion v2.1</span>
+      </div>
+    </div>
+    <div class="bridge-status-pill" id="bridgeIndicator">
+      <span class="status-dot"></span>
+      <span id="bridgeText">Connecting…</span>
+    </div>
   </header>
+
   <main>
-    <section class="step-card">
-      <div class="step-head">
-        <span class="step-number">1</span>
-        <div>
-          <h1>Load application data</h1>
-          <p>Copy from SevaDesk, then paste below. Values stay in temporary memory.</p>
+    <!-- Hero Action Panel: The Primary Autofill Section -->
+    <section class="hero-panel" id="heroPanel">
+      <div class="hero-case-info">
+        <div class="case-meta-top">
+          <span class="badge badge-portal" id="portalBadge">Detecting portal…</span>
+          <span class="badge badge-service" id="serviceBadge">No Case</span>
         </div>
+        <h1 class="applicant-name" id="applicantName">Waiting for Case Data</h1>
+        <div class="case-subtext" id="caseSubtext">Connects automatically via local bridge from SevaDesk Workspace.</div>
       </div>
-      <textarea id="payloadInput" spellcheck="false" placeholder="Paste the JSON payload copied from SevaDesk…"></textarea>
-      <div class="row-actions">
-        <button id="loadPayload" class="btn btn-primary">Load payload</button>
-        <button id="clearPayload" class="btn btn-quiet">Clear</button>
-      </div>
-      <button id="reinjectPayload" class="btn btn-secondary hidden" style="width: 100%; margin-top: 6px; font-size: 0.76rem;">⚡ Restore &amp; Re-Inject Last Session</button>
-      <div id="payloadStatus" class="status-note" role="status"></div>
+
+      <!-- MAIN PROMINENT 1-CLICK AUTOFILL BUTTON -->
+      <button id="heroAutofillBtn" class="btn btn-hero" disabled>
+        <div class="hero-btn-content">
+          <span class="hero-btn-icon">⚡</span>
+          <div class="hero-btn-text">
+            <span class="hero-btn-title" id="heroBtnTitle">AUTOFILL FORM NOW</span>
+            <span class="hero-btn-sub" id="heroBtnSub">Scanning portal form fields…</span>
+          </div>
+        </div>
+      </button>
+
+      <!-- Timeout Recovery Quick Re-inject -->
+      <button id="reinjectPayload" class="btn btn-reinject hidden">
+        ⚡ Restore &amp; Re-Inject Last Session
+      </button>
+
+      <div id="fillResult" class="status-banner hidden" role="status"></div>
     </section>
 
-    <section class="step-card">
-      <div class="step-head">
-        <span class="step-number">2</span>
-        <div>
-          <h2>Inspect active portal & adapter</h2>
-          <p>Detects official state adapters (MahaDBT, UP e-District, Saral) or heuristic fallback.</p>
+    <!-- Quick Action Controls -->
+    <section class="toolbar-card">
+      <div class="toolbar-title">
+        <span class="section-title">Field Mappings</span>
+        <span id="mappingCountBadge" class="count-pill">0 Ready</span>
+      </div>
+      <div class="toolbar-actions">
+        <button id="selectAllBtn" class="btn btn-sm btn-outline" title="Select all detected fields">✓ Select All</button>
+        <button id="deselectAllBtn" class="btn btn-sm btn-outline" title="Clear all selections">✕ Clear</button>
+        <button id="rescanBtn" class="btn btn-sm btn-outline" title="Re-scan portal DOM elements">🔄 Rescan</button>
+        <button id="inspectErrorsBtn" class="btn btn-sm btn-outline-warn" title="Inspect on-screen portal errors">🔍 Errors</button>
+      </div>
+    </section>
+
+    <!-- Matched Fields Review Section -->
+    <section id="mappingSection" class="step-card">
+      <div id="pageStatus" class="status-note" role="status">Scanning portal controls…</div>
+      <div id="mappingRows" class="mapping-list">
+        <div class="empty-note">
+          <div class="spinner"></div>
+          <p>Scanning active tab for official portal fields…</p>
         </div>
       </div>
-      <div id="adapterBadge" class="adapter-badge hidden"></div>
-      <div class="row-actions">
-        <button id="scanPage" class="btn btn-secondary" disabled>Scan visible fields</button>
-        <button id="scanErrors" class="btn btn-secondary">Inspect error messages</button>
+    </section>
+
+    <!-- Portal Error Inspector Output -->
+    <section id="portalErrorsSection" class="step-card hidden">
+      <div class="step-head">
+        <div>
+          <h2>Portal Error Diagnostics</h2>
+          <p>Scans on-screen error banners and translates obscure codes to plain action steps.</p>
+        </div>
       </div>
-      <div id="pageStatus" class="status-note" role="status">Load a payload, open the official portal tab, then scan.</div>
       <div id="portalErrors" class="error-list"></div>
     </section>
 
-    <section id="mappingSection" class="step-card hidden">
-      <div class="step-head">
-        <span class="step-number">3</span>
-        <div>
-          <h2>Review each field mapping</h2>
-          <p>Check the target field and value before filling. Low-confidence matches are not preselected.</p>
+    <!-- Manual JSON Payload Drawer (Hidden in collapsible accordion for zero clutter) -->
+    <details class="drawer-card" id="payloadDrawer">
+      <summary>⚙️ Manual Payload &amp; Offline Options</summary>
+      <div class="drawer-body">
+        <p class="drawer-desc">Normally synced automatically via local loopback bridge. Paste JSON payload if operating offline.</p>
+        <textarea id="payloadInput" spellcheck="false" placeholder="Paste SevaDesk JSON payload here…"></textarea>
+        <div class="row-actions">
+          <button id="loadPayload" class="btn btn-primary btn-sm">Load Payload</button>
+          <button id="clearPayload" class="btn btn-quiet btn-sm">Clear</button>
         </div>
+        <div id="payloadStatus" class="status-note" role="status"></div>
       </div>
-      <div class="mapping-summary" id="mappingSummary"></div>
-      <div id="mappingRows" class="mapping-list"></div>
-      <div id="mappingWarnings" class="warning-list"></div>
-      <div class="row-actions sticky-actions">
-        <button id="fillFields" class="btn btn-primary" disabled>Fill reviewed fields</button>
-        <button id="rescanPage" class="btn btn-quiet">Rescan</button>
+    </details>
+
+    <!-- Safeguard Notice -->
+    <section class="safety-note">
+      <span class="safety-icon">🛡️</span>
+      <div>
+        <strong>Safe &amp; Compliant Kiosk Assistant</strong>
+        <p>Never enters passwords, never fills OTP/CAPTCHA challenges, and never clicks final Submit/Payment.</p>
       </div>
-      <div id="fillResult" class="status-note" role="status"></div>
     </section>
 
-    <section class="safety-note">
-      <span class="safety-icon">!</span>
-      <div>
-        <strong>Human review stays in control</strong>
-        <p>This companion never clicks Submit, enters passwords, fills OTP/CAPTCHA controls, uploads files or bypasses safeguards. Review every value and submit yourself.</p>
-      </div>
-    </section>
-    <footer>MV3 activeTab + scripting only. Zero cloud calls. Zero persistent citizen storage.</footer>
+    <footer>
+      <span>SevaDesk Direct IPC Loopback</span> · <span>ActiveTab Only</span> · <span>DPDP Safe</span>
+    </footer>
   </main>
+
   <script type="module" src="popup.js"></script>
 </body>
 </html>
