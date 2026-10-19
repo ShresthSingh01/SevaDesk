@@ -3,119 +3,105 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SevaDesk Browser Companion</title>
+  <title>SevaDesk Companion</title>
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <!-- Brand Header -->
-  <header class="brandbar">
-    <div class="brand-left">
-      <div class="mark">S</div>
-      <div>
-        <strong>SevaDesk</strong>
-        <span class="subversion">Companion v2.1</span>
+  <div class="app-container">
+    <!-- Clean Minimalist Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-badge">S</div>
+        <span class="brand-name">SevaDesk</span>
+        <span class="status-indicator" id="bridgeIndicator">
+          <span class="status-dot"></span>
+          <span class="status-label" id="bridgeText">Connecting…</span>
+        </span>
+      </div>
+      <div class="header-actions">
+        <button id="rescanBtn" class="icon-btn" title="Rescan portal fields" aria-label="Rescan">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+        </button>
+        <button id="toggleSettingsBtn" class="icon-btn" title="Manual payload / settings" aria-label="Settings">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Manual Payload Drawer (Hidden by default, zero clutter) -->
+    <div id="settingsDrawer" class="settings-drawer hidden">
+      <div class="drawer-header">
+        <span>Manual Payload (Offline Fallback)</span>
+        <button id="closeSettingsBtn" class="close-btn" aria-label="Close">✕</button>
+      </div>
+      <textarea id="payloadInput" spellcheck="false" placeholder="Paste SevaDesk JSON payload here if operating offline…"></textarea>
+      <div class="drawer-actions">
+        <button id="loadPayload" class="btn btn-primary btn-xs">Load</button>
+        <button id="clearPayload" class="btn btn-quiet btn-xs">Clear</button>
+        <span id="payloadStatus" class="drawer-status"></span>
       </div>
     </div>
-    <div class="bridge-status-pill" id="bridgeIndicator">
-      <span class="status-dot"></span>
-      <span id="bridgeText">Connecting…</span>
-    </div>
-  </header>
 
-  <main>
-    <!-- Hero Action Panel: The Primary Autofill Section -->
-    <section class="hero-panel" id="heroPanel">
-      <div class="hero-case-info">
-        <div class="case-meta-top">
-          <span class="badge badge-portal" id="portalBadge">Detecting portal…</span>
-          <span class="badge badge-service" id="serviceBadge">No Case</span>
+    <!-- Hero Autofill Card -->
+    <section class="hero-card">
+      <div class="case-meta">
+        <div class="applicant-row">
+          <span class="applicant-name" id="applicantName">Waiting for Case Data</span>
+          <span class="portal-chip" id="portalBadge">Detecting portal…</span>
         </div>
-        <h1 class="applicant-name" id="applicantName">Waiting for Case Data</h1>
-        <div class="case-subtext" id="caseSubtext">Connects automatically via local bridge from SevaDesk Workspace.</div>
+        <div class="service-name" id="serviceBadge">Connects automatically via local bridge</div>
       </div>
 
-      <!-- MAIN PROMINENT 1-CLICK AUTOFILL BUTTON -->
-      <button id="heroAutofillBtn" class="btn btn-hero" disabled>
-        <div class="hero-btn-content">
-          <span class="hero-btn-icon">⚡</span>
-          <div class="hero-btn-text">
-            <span class="hero-btn-title" id="heroBtnTitle">AUTOFILL FORM NOW</span>
-            <span class="hero-btn-sub" id="heroBtnSub">Scanning portal form fields…</span>
-          </div>
-        </div>
+      <!-- Single Primary Action Button -->
+      <button id="heroAutofillBtn" class="autofill-btn" disabled>
+        <span class="btn-bolt">⚡</span>
+        <span id="heroBtnTitle">Fill Form</span>
+        <span class="field-pill" id="heroBtnCount">0 Fields</span>
       </button>
 
-      <!-- Timeout Recovery Quick Re-inject -->
-      <button id="reinjectPayload" class="btn btn-reinject hidden">
-        ⚡ Restore &amp; Re-Inject Last Session
-      </button>
-
-      <div id="fillResult" class="status-banner hidden" role="status"></div>
-    </section>
-
-    <!-- Quick Action Controls -->
-    <section class="toolbar-card">
-      <div class="toolbar-title">
-        <span class="section-title">Field Mappings</span>
-        <span id="mappingCountBadge" class="count-pill">0 Ready</span>
-      </div>
-      <div class="toolbar-actions">
-        <button id="selectAllBtn" class="btn btn-sm btn-outline" title="Select all detected fields">✓ Select All</button>
-        <button id="deselectAllBtn" class="btn btn-sm btn-outline" title="Clear all selections">✕ Clear</button>
-        <button id="rescanBtn" class="btn btn-sm btn-outline" title="Re-scan portal DOM elements">🔄 Rescan</button>
-        <button id="inspectErrorsBtn" class="btn btn-sm btn-outline-warn" title="Inspect on-screen portal errors">🔍 Errors</button>
+      <!-- Feedback / Timeout Recovery -->
+      <div class="hero-feedback">
+        <div id="fillResult" class="feedback-text"></div>
+        <button id="reinjectPayload" class="reinject-link hidden">↺ Restore previous session</button>
       </div>
     </section>
 
-    <!-- Matched Fields Review Section -->
-    <section id="mappingSection" class="step-card">
-      <div id="pageStatus" class="status-note" role="status">Scanning portal controls…</div>
-      <div id="mappingRows" class="mapping-list">
-        <div class="empty-note">
+    <!-- Matched Fields Section -->
+    <section class="fields-section">
+      <div class="section-header">
+        <div class="header-left">
+          <span class="section-title">Matched Fields</span>
+          <span class="count-tag" id="mappingCountBadge">0 Ready</span>
+        </div>
+        <div class="header-right">
+          <button id="selectAllBtn" class="link-btn">Select all</button>
+          <span class="divider">·</span>
+          <button id="deselectAllBtn" class="link-btn">Clear</button>
+        </div>
+      </div>
+
+      <div id="mappingRows" class="fields-list">
+        <div class="empty-state">
           <div class="spinner"></div>
-          <p>Scanning active tab for official portal fields…</p>
+          <p>Scanning portal form fields…</p>
         </div>
       </div>
     </section>
 
-    <!-- Portal Error Inspector Output -->
-    <section id="portalErrorsSection" class="step-card hidden">
-      <div class="step-head">
-        <div>
-          <h2>Portal Error Diagnostics</h2>
-          <p>Scans on-screen error banners and translates obscure codes to plain action steps.</p>
-        </div>
-      </div>
-      <div id="portalErrors" class="error-list"></div>
+    <!-- Error Diagnostics Bar -->
+    <section class="diagnostics-bar">
+      <button id="inspectErrorsBtn" class="diagnostics-toggle">
+        <span class="diag-icon">🔍</span>
+        <span>Inspect On-Screen Portal Errors</span>
+      </button>
+      <div id="portalErrors" class="error-container hidden"></div>
     </section>
 
-    <!-- Manual JSON Payload Drawer (Hidden in collapsible accordion for zero clutter) -->
-    <details class="drawer-card" id="payloadDrawer">
-      <summary>⚙️ Manual Payload &amp; Offline Options</summary>
-      <div class="drawer-body">
-        <p class="drawer-desc">Normally synced automatically via local loopback bridge. Paste JSON payload if operating offline.</p>
-        <textarea id="payloadInput" spellcheck="false" placeholder="Paste SevaDesk JSON payload here…"></textarea>
-        <div class="row-actions">
-          <button id="loadPayload" class="btn btn-primary btn-sm">Load Payload</button>
-          <button id="clearPayload" class="btn btn-quiet btn-sm">Clear</button>
-        </div>
-        <div id="payloadStatus" class="status-note" role="status"></div>
-      </div>
-    </details>
-
-    <!-- Safeguard Notice -->
-    <section class="safety-note">
-      <span class="safety-icon">🛡️</span>
-      <div>
-        <strong>Safe &amp; Compliant Kiosk Assistant</strong>
-        <p>Never enters passwords, never fills OTP/CAPTCHA challenges, and never clicks final Submit/Payment.</p>
-      </div>
-    </section>
-
-    <footer>
-      <span>SevaDesk Direct IPC Loopback</span> · <span>ActiveTab Only</span> · <span>DPDP Safe</span>
+    <!-- Clean Micro-Footer -->
+    <footer class="app-footer">
+      <span>🔒 DPDP Safe · Zero Clipboard Leak · Human in control</span>
     </footer>
-  </main>
+  </div>
 
   <script type="module" src="popup.js"></script>
 </body>

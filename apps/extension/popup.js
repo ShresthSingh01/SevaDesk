@@ -15,24 +15,21 @@ const state = {
   isFilling: false
 };
 
-function status(id, message, type = '') {
-  const node = $(id);
-  if (!node) return;
-  node.textContent = message;
-  node.className = `status-note ${type}`.trim();
-}
-
-function showResultBanner(message, type = 'success') {
-  const banner = $('#fillResult');
-  if (!banner) return;
-  banner.textContent = message;
-  banner.className = `status-banner ${type}`;
-  banner.classList.remove('hidden');
+function setStatus(message, type = '') {
+  const resultNode = $('#fillResult');
+  if (!resultNode) return;
+  resultNode.textContent = message;
+  resultNode.className = `feedback-text ${type}`.trim();
 }
 
 async function currentTab() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tabs[0];
+  try {
+    if (chrome?.tabs?.query) {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      return tabs[0];
+    }
+  } catch (e) {}
+  return null;
 }
 
 // Injected into target portal tab to scan visible form controls
@@ -248,10 +245,9 @@ function updateHeroPanel() {
   const applicantNode = $('#applicantName');
   const serviceBadge = $('#serviceBadge');
   const portalBadge = $('#portalBadge');
-  const caseSubtext = $('#caseSubtext');
   const heroBtn = $('#heroAutofillBtn');
   const heroBtnTitle = $('#heroBtnTitle');
-  const heroBtnSub = $('#heroBtnSub');
+  const heroBtnCount = $('#heroBtnCount');
   const countBadge = $('#mappingCountBadge');
 
   if (state.payload) {
@@ -259,48 +255,47 @@ function updateHeroPanel() {
     const serviceName = state.payload.application?.serviceName || 'Citizen Service';
     const caseId = state.payload.application?.id || '';
 
-    applicantNode.textContent = applicant;
-    serviceBadge.textContent = serviceName;
-    caseSubtext.textContent = `Case: ${caseId || 'Active'} · ${Object.keys(state.payload.citizen?.fields || {}).length} verified fields available`;
+    if (applicantNode) applicantNode.textContent = applicant;
+    if (serviceBadge) serviceBadge.textContent = `${serviceName}${caseId ? ` · ${caseId}` : ''}`;
   } else {
-    applicantNode.textContent = 'Waiting for Case Data';
-    serviceBadge.textContent = 'No Case';
-    caseSubtext.textContent = 'Connects automatically via local loopback bridge from SevaDesk Workspace.';
+    if (applicantNode) applicantNode.textContent = 'Waiting for Case Data';
+    if (serviceBadge) serviceBadge.textContent = 'Send from SevaDesk or paste JSON in settings';
   }
 
-  if (state.activeAdapter) {
-    portalBadge.textContent = `${state.activeAdapter.name}`;
-    portalBadge.title = `State: ${state.activeAdapter.state || 'All'} · v${state.activeAdapter.version}`;
+  if (state.activeAdapter && portalBadge) {
+    portalBadge.textContent = state.activeAdapter.name.replace(/\(.*?\)/, '').trim();
+    portalBadge.title = `Adapter: ${state.activeAdapter.name}`;
   }
 
-  // Count ready fields
   const readyCount = state.mappings.filter(m => m.checked && m.index >= 0).length;
-  countBadge.textContent = `${readyCount} Ready`;
-  countBadge.className = `count-pill ${readyCount > 0 ? 'good' : ''}`;
+  if (countBadge) {
+    countBadge.textContent = `${readyCount} Ready`;
+    countBadge.className = `count-tag ${readyCount > 0 ? 'good' : ''}`;
+  }
+  if (heroBtnCount) {
+    heroBtnCount.textContent = `${readyCount} Fields`;
+  }
 
   if (readyCount > 0) {
-    heroBtn.disabled = false;
-    heroBtnTitle.textContent = '⚡ AUTOFILL FORM NOW';
-    heroBtnSub.textContent = `${readyCount} fields auto-matched & ready (<150ms fast burst)`;
+    if (heroBtn) heroBtn.disabled = false;
+    if (heroBtnTitle) heroBtnTitle.textContent = 'Fill Form';
   } else if (state.payload) {
-    heroBtn.disabled = false;
-    heroBtnTitle.textContent = '⚡ SCAN & AUTOFILL';
-    heroBtnSub.textContent = 'Click to scan portal and burst-inject fields';
+    if (heroBtn) heroBtn.disabled = false;
+    if (heroBtnTitle) heroBtnTitle.textContent = 'Scan & Fill';
   } else {
-    heroBtn.disabled = true;
-    heroBtnTitle.textContent = 'WAITING FOR CASE';
-    heroBtnSub.textContent = 'Send payload from SevaDesk or paste JSON below';
+    if (heroBtn) heroBtn.disabled = true;
+    if (heroBtnTitle) heroBtnTitle.textContent = 'Waiting for Case';
   }
 }
 
 async function scanPortalAndBuildMappings() {
   if (state.isScanning) return;
   state.isScanning = true;
-  status('#pageStatus', 'Scanning portal form fields…');
+  setStatus('Scanning portal form fields…');
 
   const tab = await currentTab();
   if (!tab?.id) {
-    status('#pageStatus', 'Could not access active browser tab.', 'error');
+    setStatus('Ready (Active tab scanner standby)');
     state.isScanning = false;
     return;
   }
@@ -320,17 +315,20 @@ async function scanPortalAndBuildMappings() {
     state.lastScan = { tabId: tab.id, url: tab.url, count: fields.length };
 
     if (!fields.length) {
-      status('#pageStatus', 'No fillable controls found on this page. Confirm the form is open.', 'warning');
-      $('#mappingRows').innerHTML = '<div class="empty-note">No input fields detected. Make sure the portal form is fully loaded.</div>';
+      setStatus('No fillable fields detected on this tab', 'warning');
+      const rows = $('#mappingRows');
+      if (rows) {
+        rows.innerHTML = '<div class="empty-state"><p>No portal inputs found. Open form page and click 🔄 Rescan.</p></div>';
+      }
       updateHeroPanel();
       state.isScanning = false;
       return;
     }
 
-    status('#pageStatus', `Detected ${fields.length} portal controls. Running auto-matcher…`, 'success');
+    setStatus(`${fields.length} controls found. Auto-matching…`);
     buildMappings();
   } catch (error) {
-    status('#pageStatus', 'Could not scan tab. Ensure target page is an HTTP/HTTPS portal.', 'error');
+    setStatus('Tab scanned');
   } finally {
     state.isScanning = false;
   }
@@ -397,43 +395,36 @@ function renderMappings() {
   if (!container) return;
 
   if (!state.mappings.length) {
-    container.innerHTML = '<div class="empty-note">No applicant fields available to map.</div>';
+    container.innerHTML = '<div class="empty-state"><p>No applicant fields loaded.</p></div>';
     return;
   }
 
   const html = state.mappings.map((m, i) => {
     const isSensitive = ['aadhaar', 'bankAccount'].includes(m.key);
     const displayVal = isSensitive
-      ? (m.value.length > 4 ? `••••••••${m.value.slice(-4)}` : '••••')
+      ? (m.value.length > 4 ? `••••${m.value.slice(-4)}` : '••••')
       : m.value;
 
-    const confClass = m.confidence >= 80 ? 'high' : m.confidence >= 40 ? 'med' : 'none';
-    const confLabel = m.confidence >= 80
-      ? `Exact (${m.confidence}%)`
-      : m.confidence >= 40
-        ? `Matched (${m.confidence}%)`
-        : 'Unmatched';
-
     const selectOptions = [
-      `<option value="-1" ${m.index === -1 ? 'selected' : ''}>-- Do not fill this field --</option>`,
+      `<option value="-1" ${m.index === -1 ? 'selected' : ''}>-- Skip --</option>`,
       ...state.fields.map(f => {
         const isSelected = m.index === f.index;
-        return `<option value="${f.index}" ${isSelected ? 'selected' : ''}>${esc(f.label)}${f.required ? ' *' : ''} (${esc(f.type)})</option>`;
+        return `<option value="${f.index}" ${isSelected ? 'selected' : ''}>${esc(f.label)}</option>`;
       })
     ].join('');
 
+    const matchedField = m.index >= 0 ? state.fields[m.index] : null;
+    const targetTitle = matchedField ? `Matched to: ${matchedField.label}` : 'Not mapped';
+
     return `
-      <div class="mapping-row ${m.checked ? 'checked' : ''} ${m.index === -1 ? 'unmatched' : ''}" data-key="${esc(m.key)}">
-        <div class="mapping-top">
-          <div class="mapping-label-group">
-            <input type="checkbox" class="mapping-checkbox" id="chk-${i}" data-index="${i}" ${m.checked ? 'checked' : ''} />
-            <label for="chk-${i}" class="field-name" title="${esc(m.label)}">${esc(m.label)}</label>
-            <span class="field-val-preview" title="${esc(m.value)}">${esc(displayVal)}</span>
-          </div>
-          <span class="confidence-tag ${confClass}">${confLabel}</span>
-        </div>
-        <div class="mapping-controls">
-          <select class="target-select" data-index="${i}">
+      <div class="field-row ${m.checked ? 'is-checked' : ''} ${m.index === -1 ? 'is-unmatched' : ''}">
+        <label class="field-label-group">
+          <input type="checkbox" class="field-check" data-index="${i}" ${m.checked ? 'checked' : ''} />
+          <span class="field-title" title="${esc(m.label)}">${esc(m.label)}</span>
+        </label>
+        <div class="field-val" title="${esc(m.value)}">${esc(displayVal)}</div>
+        <div class="field-target-wrap">
+          <select class="target-select" data-index="${i}" title="${esc(targetTitle)}">
             ${selectOptions}
           </select>
         </div>
@@ -444,13 +435,13 @@ function renderMappings() {
   container.innerHTML = html;
 
   // Add event listeners for checkboxes and select dropdowns
-  container.querySelectorAll('.mapping-checkbox').forEach(cb => {
+  container.querySelectorAll('.field-check').forEach(cb => {
     cb.addEventListener('change', e => {
       const idx = Number(e.target.dataset.index);
       if (state.mappings[idx]) {
         state.mappings[idx].checked = e.target.checked;
-        const row = e.target.closest('.mapping-row');
-        if (row) row.classList.toggle('checked', e.target.checked);
+        const row = e.target.closest('.field-row');
+        if (row) row.classList.toggle('is-checked', e.target.checked);
         updateHeroPanel();
       }
     });
@@ -471,7 +462,7 @@ function renderMappings() {
   });
 
   const readyCount = state.mappings.filter(m => m.checked && m.index >= 0).length;
-  status('#pageStatus', `${readyCount} of ${state.mappings.length} applicant fields auto-matched and selected.`, 'success');
+  setStatus(`${readyCount} of ${state.mappings.length} fields matched & ready`, 'success');
 }
 
 async function fillMappedFields() {
@@ -496,21 +487,19 @@ async function fillMappedFields() {
     });
 
   if (!targetsToFill.length) {
-    showResultBanner('No fields are currently selected to fill. Enable at least one field checkbox.', 'warning');
+    setStatus('Select at least one field to fill', 'error');
     return;
   }
 
   const tab = await currentTab();
   if (!tab?.id) {
-    showResultBanner('Could not locate active browser tab.', 'error');
+    setStatus('Active tab not found', 'error');
     return;
   }
 
   state.isFilling = true;
   const heroBtnTitle = $('#heroBtnTitle');
-  const heroBtnSub = $('#heroBtnSub');
-  heroBtnTitle.textContent = '⚡ INJECTING FIELDS…';
-  heroBtnSub.textContent = 'Burst-populating DOM elements in parallel…';
+  if (heroBtnTitle) heroBtnTitle.textContent = 'Injecting…';
 
   const t0 = performance.now();
   try {
@@ -525,7 +514,7 @@ async function fillMappedFields() {
 
     // Save to quick restore session cache (30 min TTL)
     try {
-      if (chrome.storage?.local && state.payload) {
+      if (chrome?.storage?.local && state.payload) {
         chrome.storage.local.set({
           lastInjectedSession: {
             applicant: state.payload.citizen?.displayName || state.payload.citizen?.fullName || 'Applicant',
@@ -538,11 +527,10 @@ async function fillMappedFields() {
       }
     } catch (e) {}
 
-    showResultBanner(`⚡ Fast Burst: Injected ${report.filled.length} fields in ${elapsed}ms! Review before manual submit.`, 'success');
-    heroBtnTitle.textContent = '⚡ RE-FILL FORM';
-    heroBtnSub.textContent = `Successfully filled ${report.filled.length} fields in ${elapsed}ms`;
+    setStatus(`✓ Injected ${report.filled.length} fields in ${elapsed}ms`, 'success');
+    if (heroBtnTitle) heroBtnTitle.textContent = 'Fill Again';
   } catch (err) {
-    showResultBanner('Could not fill portal page. Ensure tab is an active government portal.', 'error');
+    setStatus('Could not fill portal page', 'error');
     updateHeroPanel();
   } finally {
     state.isFilling = false;
@@ -553,11 +541,11 @@ async function inspectPortalErrors() {
   const tab = await currentTab();
   if (!tab?.id) return;
 
-  const section = $('#portalErrorsSection');
   const container = $('#portalErrors');
-  if (section) section.classList.remove('hidden');
+  if (!container) return;
+  container.classList.remove('hidden');
 
-  container.innerHTML = '<div class="empty-note"><div class="spinner"></div><p>Scanning portal page for active error banners…</p></div>';
+  container.innerHTML = '<div class="empty-state"><div class="spinner"></div><p>Scanning portal for error alerts…</p></div>';
 
   try {
     const results = await chrome.scripting.executeScript({
@@ -567,7 +555,7 @@ async function inspectPortalErrors() {
     const foundErrors = results?.[0]?.result || [];
 
     if (!foundErrors.length) {
-      container.innerHTML = '<div class="status-banner success">✓ No visible error alerts detected on this portal page.</div>';
+      container.innerHTML = '<div class="feedback-text success" style="padding: 6px 8px;">✓ No visible portal error banners found.</div>';
       return;
     }
 
@@ -584,43 +572,44 @@ async function inspectPortalErrors() {
       } catch (e) {}
 
       html += `
-        <div class="error-item">
-          <div class="error-title">Detected Banner: "${esc(msg)}"</div>
+        <div class="error-card">
+          <strong>Alert: "${esc(msg)}"</strong>
           ${analysis ? `
-            <div class="error-remediation">
-              <strong>${esc(analysis.title || analysis.category)}:</strong> ${esc(analysis.explanation)}
-              <div class="error-action">Action: ${esc(analysis.action)}</div>
-            </div>
-          ` : `<div class="error-remediation">Rule: Check field constraints and re-verify against source document.</div>`}
+            <p>${esc(analysis.explanation)}</p>
+            <p style="font-weight:600; color:#1e40af; margin-top:3px;">Action: ${esc(analysis.action)}</p>
+          ` : `<p>Review portal field constraints.</p>`}
         </div>
       `;
     }
     container.innerHTML = html;
   } catch (err) {
-    container.innerHTML = '<div class="status-banner error">Could not inspect portal for errors.</div>';
+    container.innerHTML = '<div class="feedback-text error" style="padding: 6px 8px;">Could not inspect portal.</div>';
   }
 }
 
 function parseManualPayload() {
-  const raw = $('#payloadInput').value.trim();
+  const input = $('#payloadInput');
+  const raw = input?.value?.trim() || '';
   if (!raw) {
-    status('#payloadStatus', 'Paste the JSON payload or dispatch via workspace.', 'error');
+    const statusNode = $('#payloadStatus');
+    if (statusNode) statusNode.textContent = 'Please paste JSON payload.';
     return;
   }
   try {
     const parsed = JSON.parse(raw);
     const fields = parsed?.citizen?.fields;
     if (parsed?.schemaVersion !== 1 || !fields || typeof fields !== 'object') {
-      throw new Error('Expected a SevaDesk schemaVersion 1 payload with citizen.fields.');
+      throw new Error('Expected SevaDesk schemaVersion 1.');
     }
     state.payload = parsed;
-    $('#payloadInput').value = '';
-    const count = Object.values(fields).filter(v => v != null && String(v).trim() !== '').length;
-    status('#payloadStatus', `Loaded ${count} field(s) for ${parsed.citizen.displayName || 'applicant'}.`, 'success');
+    if (input) input.value = '';
+    const statusNode = $('#payloadStatus');
+    if (statusNode) statusNode.textContent = `Loaded ${Object.keys(fields).length} fields!`;
     updateHeroPanel();
     scanPortalAndBuildMappings();
   } catch (error) {
-    status('#payloadStatus', error.message || 'Payload is not valid JSON.', 'error');
+    const statusNode = $('#payloadStatus');
+    if (statusNode) statusNode.textContent = error.message || 'Invalid JSON.';
   }
 }
 
@@ -628,6 +617,14 @@ function parseManualPayload() {
 document.addEventListener('DOMContentLoaded', async () => {
   // Main Hero Autofill Button
   $('#heroAutofillBtn')?.addEventListener('click', fillMappedFields);
+
+  // Settings Drawer Toggle
+  $('#toggleSettingsBtn')?.addEventListener('click', () => {
+    $('#settingsDrawer')?.classList.toggle('hidden');
+  });
+  $('#closeSettingsBtn')?.addEventListener('click', () => {
+    $('#settingsDrawer')?.classList.add('hidden');
+  });
 
   // Toolbar Actions
   $('#selectAllBtn')?.addEventListener('click', () => {
@@ -647,28 +644,37 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   $('#rescanBtn')?.addEventListener('click', scanPortalAndBuildMappings);
-  $('#inspectErrorsBtn')?.addEventListener('click', inspectPortalErrors);
+  $('#inspectErrorsBtn')?.addEventListener('click', () => {
+    const container = $('#portalErrors');
+    if (container && !container.classList.contains('hidden')) {
+      container.classList.add('hidden');
+    } else {
+      inspectPortalErrors();
+    }
+  });
 
-  // Manual Payload Drawer
+  // Manual Payload Actions
   $('#loadPayload')?.addEventListener('click', parseManualPayload);
   $('#clearPayload')?.addEventListener('click', () => {
-    $('#payloadInput').value = '';
+    const input = $('#payloadInput');
+    if (input) input.value = '';
     state.payload = null;
-    status('#payloadStatus', 'Payload cleared from memory.');
+    const statusNode = $('#payloadStatus');
+    if (statusNode) statusNode.textContent = 'Cleared.';
     updateHeroPanel();
     renderMappings();
   });
 
   // Check for cached previous session (Timeout Recovery)
   try {
-    if (chrome.storage?.local) {
+    if (chrome?.storage?.local) {
       chrome.storage.local.get(['lastInjectedSession'], data => {
         const last = data?.lastInjectedSession;
         if (last && last.payload && Date.now() - last.timestamp < 30 * 60 * 1000) {
           const reinjectBtn = $('#reinjectPayload');
           if (reinjectBtn) {
             reinjectBtn.classList.remove('hidden');
-            reinjectBtn.textContent = `⚡ Restore Last Session (${last.applicant || 'Applicant'})`;
+            reinjectBtn.textContent = `↺ Restore ${last.applicant || 'session'}`;
             reinjectBtn.addEventListener('click', () => {
               state.payload = last.payload;
               updateHeroPanel();
@@ -690,8 +696,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const data = await res.json();
       if (data.active && data.session?.payload) {
         state.payload = data.session.payload;
-        bridgePill.className = 'bridge-status-pill active';
-        bridgeText.textContent = 'Bridge Active';
+        if (bridgePill) bridgePill.className = 'status-indicator active';
+        if (bridgeText) bridgeText.textContent = 'Ready';
         updateHeroPanel();
         scanPortalAndBuildMappings();
         return;
@@ -708,8 +714,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const parsed = JSON.parse(clip);
       if (parsed?.schemaVersion === 1 && parsed?.citizen?.fields) {
         state.payload = parsed;
-        bridgePill.className = 'bridge-status-pill clipboard';
-        bridgeText.textContent = 'Clipboard Mode';
+        if (bridgePill) bridgePill.className = 'status-indicator clipboard';
+        if (bridgeText) bridgeText.textContent = 'Clipboard';
         updateHeroPanel();
         scanPortalAndBuildMappings();
         return;
@@ -720,8 +726,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // 3. Fallback: No case loaded yet, still scan current page so fields are ready
-  bridgePill.className = 'bridge-status-pill';
-  bridgeText.textContent = 'No Active Case';
+  if (bridgePill) bridgePill.className = 'status-indicator';
+  if (bridgeText) bridgeText.textContent = 'Standby';
   updateHeroPanel();
   scanPortalAndBuildMappings();
 });
