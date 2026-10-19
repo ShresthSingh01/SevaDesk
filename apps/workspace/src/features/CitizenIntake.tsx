@@ -11,7 +11,12 @@ import {
   Eye,
   EyeOff,
   Volume2,
-  VolumeX
+  VolumeX,
+  Search,
+  X,
+  ChevronDown,
+  ChevronUp,
+  Filter
 } from 'lucide-react';
 import { Citizen, ServiceDefinition, OcrCandidate, extractOcrCandidates, maskIdentifier, validateCitizen } from '@sevadesk/core-types';
 import { requestOcrScan } from '../lib/api';
@@ -34,11 +39,58 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
   daemonConnected
 }) => {
   const [selectedServiceId, setSelectedServiceId] = useState<string>(services[0]?.id || '');
+  const [serviceSearchQuery, setServiceSearchQuery] = useState('');
+  const [serviceCategory, setServiceCategory] = useState('All');
+  const [isServicePickerOpen, setIsServicePickerOpen] = useState(false);
+  const [showAllOptionalFields, setShowAllOptionalFields] = useState(false);
+
   const selectedService = services.find(s => s.id === selectedServiceId);
 
-  const isFieldRequiredByService = (key: string) => {
-    return Boolean(selectedService?.requiredFields?.includes(key as any));
+  const isFieldRequired = (key: keyof Citizen) => {
+    if (!selectedService) return false;
+    return Boolean(selectedService.requiredFields?.includes(key as any));
   };
+
+  const isFieldRequiredByService = isFieldRequired;
+
+  const isFieldVisible = (key: keyof Citizen) => {
+    // If generic citizen intake (no service selected), show all fields
+    if (!selectedService) return true;
+    // If the field is explicitly required by this service, show it
+    if (isFieldRequired(key)) return true;
+    // If the field has a non-empty value (e.g. from OCR extraction or previous save), keep it visible
+    if (formData[key] && String(formData[key]).trim() !== '') return true;
+    // If operator clicked to show all optional fields, show it
+    if (showAllOptionalFields) return true;
+    // Otherwise, hide unwanted fields!
+    return false;
+  };
+
+  const SERVICE_CATEGORIES = ['All', 'UP e-District', 'Agriculture / DBT', 'Transport', 'Welfare & Health', 'Identity & Voter'];
+
+  const getServiceCategory = (s: ServiceDefinition) => {
+    if (s.id.startsWith('srv-up')) return 'UP e-District';
+    if (s.id.includes('parivahan') || s.id.includes('dl')) return 'Transport';
+    if (s.id.includes('kisan')) return 'Agriculture / DBT';
+    if (s.id.includes('voter') || s.id.includes('nvsp')) return 'Identity & Voter';
+    return 'Welfare & Health';
+  };
+
+  const filteredServices = services.filter(s => {
+    const q = serviceSearchQuery.toLowerCase().trim();
+    const matchesQuery = !q || 
+      s.name.toLowerCase().includes(q) || 
+      (s.department && s.department.toLowerCase().includes(q)) ||
+      (s.notes && s.notes.toLowerCase().includes(q));
+    if (!matchesQuery) return false;
+    if (serviceCategory === 'All') return true;
+    return getServiceCategory(s) === serviceCategory;
+  });
+
+  const allFieldKeys: (keyof Citizen)[] = [
+    'fullName', 'dob', 'gender', 'mobile', 'email', 'address', 'district', 'state', 'pincode', 'aadhaar', 'voterId', 'rationCard', 'bankAccount', 'ifsc'
+  ];
+  const hiddenFields = allFieldKeys.filter(k => !isFieldVisible(k));
 
   const [formData, setFormData] = useState<Partial<Citizen>>(
     initialCitizen || {
@@ -400,7 +452,11 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
       return;
     }
 
-    const valResult = validateCitizen(formData, ['fullName']);
+    const fieldsToValidate = selectedService?.requiredFields && selectedService.requiredFields.length > 0
+      ? Array.from(new Set(['fullName', ...selectedService.requiredFields])) as any
+      : ['fullName'];
+
+    const valResult = validateCitizen(formData, fieldsToValidate);
     if (!valResult.valid) {
       setFormErrors(valResult.errors.map(err => err.message));
       return;
@@ -455,70 +511,203 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
       </div>
 
       {/* Target Government Scheme / Service Selector Card */}
-      <div className="panel" style={{ marginBottom: '20px', padding: '16px 20px', borderLeft: '4px solid var(--primary)', backgroundColor: 'var(--bg-card)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-          <div style={{ flex: '1 1 320px' }}>
-            <label className="form-label" htmlFor="targetServiceSelect" style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span>🎯</span> Target Government Scheme / Service
-            </label>
-            <select
-              id="targetServiceSelect"
-              className="form-control"
-              value={selectedServiceId}
-              onChange={e => setSelectedServiceId(e.target.value)}
-              style={{ fontWeight: 600, fontSize: '0.9rem' }}
-            >
-              <option value="">Generic Citizen Intake (Save Record Only)</option>
-              {services.map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.name} — {s.department || 'Govt Portal'}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {selectedService && (
-            <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={{ fontSize: '0.75rem', lineHeight: '1.4' }}>
-                <div style={{ color: 'var(--text-muted)' }}>Official Portal</div>
-                <a
-                  href={selectedService.portalUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: 'var(--primary)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                >
-                  {selectedService.portalUrl ? new URL(selectedService.portalUrl).hostname : 'Govt Portal'} ↗
-                </a>
+      {selectedService && !isServicePickerOpen ? (
+        <div className="panel" style={{ marginBottom: '20px', padding: '16px 20px', borderLeft: '4px solid var(--primary)', backgroundColor: 'var(--bg-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+            <div style={{ flex: '1 1 320px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                <span style={{ fontSize: '1.2rem' }}>🎯</span>
+                <span style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-main)' }}>{selectedService.name}</span>
+                <span className="status-pill good" style={{ padding: '2px 8px', fontSize: '0.7rem' }}>
+                  {getServiceCategory(selectedService)}
+                </span>
               </div>
-
-              <div style={{ fontSize: '0.75rem', lineHeight: '1.4' }}>
-                <div style={{ color: 'var(--text-muted)' }}>Transparent Fees</div>
-                <div style={{ fontWeight: 700, color: 'var(--status-good)' }}>
-                  Govt: ₹{selectedService.officialFee ?? 0} + CSC: ₹{selectedService.operatorCharge ?? 0} = ₹{(selectedService.officialFee || 0) + (selectedService.operatorCharge || 0)}
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                {selectedService.department || 'Govt Portal'} — {selectedService.notes || 'Portal integration active'}
+              </div>
+              <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+                {selectedService.portalUrl && (
+                  <a
+                    href={selectedService.portalUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: 'var(--primary)', fontWeight: 600, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    {new URL(selectedService.portalUrl).hostname} ↗
+                  </a>
+                )}
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--status-good)' }}>
+                  Statutory Fee: Govt ₹{selectedService.officialFee ?? 0} + CSC ₹{selectedService.operatorCharge ?? 0} = ₹{(selectedService.officialFee || 0) + (selectedService.operatorCharge || 0)}
                 </div>
-              </div>
-
-              <div style={{ fontSize: '0.75rem', lineHeight: '1.4' }}>
-                <div style={{ color: 'var(--text-muted)' }}>Upload Limits</div>
-                <div style={{ fontWeight: 600 }}>
-                  Max {selectedService.maxUploadMB ? `${selectedService.maxUploadMB * 1024 < 1024 ? `${selectedService.maxUploadMB * 1024} KB` : `${selectedService.maxUploadMB} MB`}` : 'Standard'} ({selectedService.allowedExtensions?.join(', ') || 'pdf, jpg'})
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Max Upload: {selectedService.maxUploadMB ? `${selectedService.maxUploadMB * 1024 < 1024 ? `${selectedService.maxUploadMB * 1024} KB` : `${selectedService.maxUploadMB} MB`}` : 'Standard'} ({selectedService.allowedExtensions?.join(', ') || 'pdf, jpg'})
                 </div>
               </div>
             </div>
+
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsServicePickerOpen(true)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', padding: '6px 12px' }}
+              >
+                <Search size={14} /> Search / Change Service ({services.length})
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => { setSelectedServiceId(''); }}
+                style={{ fontSize: '0.8rem', padding: '6px 10px', color: 'var(--text-muted)' }}
+                title="Switch to generic intake without service filtering"
+              >
+                Generic Mode
+              </button>
+            </div>
+          </div>
+
+          {selectedService.requiredFields && selectedService.requiredFields.length > 0 && (
+            <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 700, color: 'var(--text-muted)' }}>Portal Required Fields:</span>
+              {selectedService.requiredFields.map(rf => (
+                <span key={rf} className="status-pill warn" style={{ padding: '2px 8px', fontSize: '0.7rem' }}>
+                  ★ {rf}
+                </span>
+              ))}
+              <span style={{ color: 'var(--status-good)', marginLeft: 'auto', fontWeight: 600 }}>
+                ✓ Only required fields shown in intake below
+              </span>
+            </div>
           )}
         </div>
+      ) : (
+        <div className="panel" style={{ marginBottom: '20px', padding: '16px 20px', borderLeft: '4px solid var(--primary)', backgroundColor: 'var(--bg-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>🎯</span> Select Government Scheme / Service ({services.length} available)
+              </h3>
+              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                Choose a service to tailor the intake form to only its required fields. Search by name, department or scheme.
+              </p>
+            </div>
+            {selectedService && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsServicePickerOpen(false)}
+                style={{ fontSize: '0.75rem', padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+              >
+                <X size={13} /> Cancel
+              </button>
+            )}
+          </div>
 
-        {selectedService && selectedService.requiredFields && selectedService.requiredFields.length > 0 && (
-          <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 700, color: 'var(--text-muted)' }}>Required by {selectedService.name.split('(')[0].trim()}:</span>
-            {selectedService.requiredFields.map(rf => (
-              <span key={rf} className="status-pill warn" style={{ padding: '2px 8px', fontSize: '0.7rem' }}>
-                ★ {rf}
-              </span>
+          {/* Search Bar */}
+          <div style={{ position: 'relative', marginBottom: '12px' }}>
+            <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              className="form-control"
+              placeholder="Search by keyword, e.g. 'Income', 'PM-Kisan', 'Caste', 'Ration', 'Sarathi', 'DL', 'Scholarship', 'Ayushman'..."
+              value={serviceSearchQuery}
+              onChange={e => setServiceSearchQuery(e.target.value)}
+              style={{ paddingLeft: '36px', fontSize: '0.88rem' }}
+              autoFocus
+            />
+            {serviceSearchQuery && (
+              <button
+                type="button"
+                onClick={() => setServiceSearchQuery('')}
+                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Category Filter Pills */}
+          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+            {SERVICE_CATEGORIES.map(cat => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setServiceCategory(cat)}
+                className={`btn ${serviceCategory === cat ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.72rem', padding: '3px 10px', borderRadius: 'var(--radius-full)' }}
+              >
+                {cat}
+              </button>
             ))}
           </div>
-        )}
-      </div>
+
+          {/* Service Cards Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px', maxHeight: '280px', overflowY: 'auto', paddingRight: '4px' }}>
+            {/* Generic Intake Card */}
+            <div
+              onClick={() => { setSelectedServiceId(''); setIsServicePickerOpen(false); }}
+              style={{
+                padding: '10px 12px',
+                borderRadius: 'var(--radius-md)',
+                border: `1px solid ${!selectedServiceId ? 'var(--primary)' : 'var(--border-light)'}`,
+                backgroundColor: !selectedServiceId ? 'var(--primary-light)' : 'var(--bg-main)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-main)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Generic Citizen Intake</span>
+                {!selectedServiceId && <CheckCircle2 size={14} color="var(--primary)" />}
+              </div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                No target scheme. Shows all demographic & identifier fields.
+              </div>
+            </div>
+
+            {/* Filtered Services */}
+            {filteredServices.map(srv => {
+              const isSelected = selectedServiceId === srv.id;
+              return (
+                <div
+                  key={srv.id}
+                  onClick={() => { setSelectedServiceId(srv.id); setIsServicePickerOpen(false); }}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `1px solid ${isSelected ? 'var(--primary)' : 'var(--border-light)'}`,
+                    backgroundColor: isSelected ? 'var(--primary-light)' : 'var(--bg-main)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.84rem', color: 'var(--text-main)' }}>
+                      {srv.name}
+                    </div>
+                    {isSelected && <CheckCircle2 size={14} color="var(--primary)" style={{ flexShrink: 0 }} />}
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {srv.department || 'Govt Portal'}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '0.7rem' }}>
+                    <span style={{ color: 'var(--status-good)', fontWeight: 600 }}>
+                      Govt: ₹{srv.officialFee ?? 0} + CSC: ₹{srv.operatorCharge ?? 0}
+                    </span>
+                    <span className="status-pill warn" style={{ padding: '1px 5px', fontSize: '0.65rem' }}>
+                      {srv.requiredFields?.length || 0} fields
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+            {filteredServices.length === 0 && (
+              <div style={{ gridColumn: '1 / -1', padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                No services match "{serviceSearchQuery}". Try another keyword or category.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(360px, 1fr)', gap: '24px', alignItems: 'start' }}>
         {/* Left Form */}
@@ -552,258 +741,555 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             </div>
           )}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-            <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.8rem' }}>1</span>
-            <h2 style={{ fontSize: '1.1rem' }}>Demographics & Contact</h2>
-          </div>
-
-          <div className="form-grid">
-            <div className="form-group full">
-              <label className="form-label" htmlFor="fullName">
-                Full name *
-                {isAutoFilled('fullName') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                {isFieldRequiredByService('fullName') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
-              </label>
-              <input
-                id="fullName"
-                className="form-control"
-                placeholder="Name as printed on original document"
-                value={formData.fullName || ''}
-                onChange={e => handleInputChange('fullName', e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="dob">
-                Date of birth
-                {isAutoFilled('dob') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                {isFieldRequiredByService('dob') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
-              </label>
-              <input
-                id="dob"
-                type="date"
-                className="form-control"
-                value={formData.dob || ''}
-                onChange={e => handleInputChange('dob', e.target.value)}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="gender">
-                Gender
-                {isAutoFilled('gender') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                {isFieldRequiredByService('gender') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
-              </label>
-              <select
-                id="gender"
-                className="form-control"
-                value={formData.gender || ''}
-                onChange={e => handleInputChange('gender', e.target.value)}
-              >
-                <option value="">Select gender…</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="Transgender">Transgender</option>
-                <option value="Prefer not to say">Prefer not to say</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="mobile">
-                Mobile number (10 digits)
-                {isAutoFilled('mobile') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                {isFieldRequiredByService('mobile') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
-              </label>
-              <input
-                id="mobile"
-                type="tel"
-                maxLength={10}
-                className="form-control"
-                placeholder="10-digit phone"
-                value={formData.mobile || ''}
-                onChange={e => handleInputChange('mobile', e.target.value)}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="email">Email address</label>
-              <input
-                id="email"
-                type="email"
-                className="form-control"
-                placeholder="Optional"
-                value={formData.email || ''}
-                onChange={e => handleInputChange('email', e.target.value)}
-              />
-            </div>
-
-            <div className="form-group full">
-              <label className="form-label" htmlFor="address">
-                Address
-                {isAutoFilled('address') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                {isFieldRequiredByService('address') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
-              </label>
-              <input
-                id="address"
-                className="form-control"
-                placeholder="House / street / village / ward"
-                value={formData.address || ''}
-                onChange={e => handleInputChange('address', e.target.value)}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="district">
-                District
-                {isAutoFilled('district') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                {isFieldRequiredByService('district') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
-              </label>
-              <input
-                id="district"
-                className="form-control"
-                placeholder="District"
-                value={formData.district || ''}
-                onChange={e => handleInputChange('district', e.target.value)}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="state">
-                State / UT
-                {isAutoFilled('state') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                {isFieldRequiredByService('state') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
-              </label>
-              <input
-                id="state"
-                className="form-control"
-                placeholder="State"
-                value={formData.state || ''}
-                onChange={e => handleInputChange('state', e.target.value)}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="pincode">
-                PIN code (6 digits)
-                {isAutoFilled('pincode') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                {isFieldRequiredByService('pincode') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
-              </label>
-              <input
-                id="pincode"
-                maxLength={6}
-                className="form-control"
-                placeholder="6-digit PIN"
-                value={formData.pincode || ''}
-                onChange={e => handleInputChange('pincode', e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div style={{ margin: '24px 0', borderTop: '1px solid var(--border-light)' }} />
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-            <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.8rem' }}>2</span>
-            <div>
-              <h2 style={{ fontSize: '1.1rem' }}>Identifiers (Only when required)</h2>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Masked outside editing. Stored only in local encrypted vault.</p>
-            </div>
-          </div>
-
-          <div className="form-grid">
-            <div className="form-group">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label className="form-label" htmlFor="aadhaar">
-                  Aadhaar (12 digits)
-                  {isAutoFilled('aadhaar') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                  {isFieldRequiredByService('aadhaar') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setShowAadhaar(!showAadhaar)}
-                  style={{ color: 'var(--text-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
-                >
-                  {showAadhaar ? <EyeOff size={13} /> : <Eye size={13} />}
-                  {showAadhaar ? 'Hide' : 'Show'}
-                </button>
+          {selectedService ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.8rem' }}>1</span>
+                  <div>
+                    <h2 style={{ fontSize: '1.05rem', margin: 0 }}>Required Information for {selectedService.name.split('(')[0].trim()}</h2>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
+                      Tailored to portal requirements ({selectedService.requiredFields?.length || 0} fields). Unwanted fields hidden.
+                    </p>
+                  </div>
+                </div>
+                <span className="status-pill good" style={{ padding: '3px 8px', fontSize: '0.72rem' }}>
+                  ★ Clean View Active
+                </span>
               </div>
-              <input
-                id="aadhaar"
-                type={showAadhaar ? 'text' : 'password'}
-                maxLength={12}
-                className="form-control"
-                placeholder="12 digits — only if portal requires it"
-                value={formData.aadhaar || ''}
-                onChange={e => handleInputChange('aadhaar', e.target.value)}
-              />
-            </div>
 
-            <div className="form-group">
-              <label className="form-label" htmlFor="voterId">Voter ID / EPIC</label>
-              <input
-                id="voterId"
-                className="form-control"
-                placeholder="EPIC number"
-                value={formData.voterId || ''}
-                onChange={e => handleInputChange('voterId', e.target.value)}
-              />
-            </div>
+              <div className="form-grid">
+                {isFieldVisible('fullName') && (
+                  <div className="form-group full">
+                    <label className="form-label" htmlFor="fullName">
+                      Full name *
+                      {isAutoFilled('fullName') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                      {isFieldRequired('fullName') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                    </label>
+                    <input
+                      id="fullName"
+                      className="form-control"
+                      placeholder="Name as printed on original document"
+                      value={formData.fullName || ''}
+                      onChange={e => handleInputChange('fullName', e.target.value)}
+                      required
+                    />
+                  </div>
+                )}
 
-            <div className="form-group">
-              <label className="form-label" htmlFor="rationCard">
-                Ration card number
-                {isFieldRequiredByService('rationCard') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
-              </label>
-              <input
-                id="rationCard"
-                className="form-control"
-                placeholder="Ration card / Family ID"
-                value={formData.rationCard || ''}
-                onChange={e => handleInputChange('rationCard', e.target.value)}
-              />
-            </div>
+                {isFieldVisible('dob') && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dob">
+                      Date of birth
+                      {isAutoFilled('dob') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                      {isFieldRequired('dob') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                    </label>
+                    <input
+                      id="dob"
+                      type="date"
+                      className="form-control"
+                      value={formData.dob || ''}
+                      onChange={e => handleInputChange('dob', e.target.value)}
+                    />
+                  </div>
+                )}
 
-            <div className="form-group">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label className="form-label" htmlFor="bankAccount">
-                  Bank account number
-                  {isFieldRequiredByService('bankAccount') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setShowBank(!showBank)}
-                  style={{ color: 'var(--text-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
-                >
-                  {showBank ? <EyeOff size={13} /> : <Eye size={13} />}
-                  {showBank ? 'Hide' : 'Show'}
-                </button>
+                {isFieldVisible('gender') && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="gender">
+                      Gender
+                      {isAutoFilled('gender') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                      {isFieldRequired('gender') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                    </label>
+                    <select
+                      id="gender"
+                      className="form-control"
+                      value={formData.gender || ''}
+                      onChange={e => handleInputChange('gender', e.target.value)}
+                    >
+                      <option value="">Select gender…</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Transgender">Transgender</option>
+                      <option value="Prefer not to say">Prefer not to say</option>
+                    </select>
+                  </div>
+                )}
+
+                {isFieldVisible('mobile') && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="mobile">
+                      Mobile number (10 digits)
+                      {isAutoFilled('mobile') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                      {isFieldRequired('mobile') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                    </label>
+                    <input
+                      id="mobile"
+                      type="tel"
+                      maxLength={10}
+                      className="form-control"
+                      placeholder="10-digit phone"
+                      value={formData.mobile || ''}
+                      onChange={e => handleInputChange('mobile', e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('email') && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="email">
+                      Email address
+                      {isFieldRequired('email') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                    </label>
+                    <input
+                      id="email"
+                      type="email"
+                      className="form-control"
+                      placeholder="Optional"
+                      value={formData.email || ''}
+                      onChange={e => handleInputChange('email', e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('address') && (
+                  <div className="form-group full">
+                    <label className="form-label" htmlFor="address">
+                      Address
+                      {isAutoFilled('address') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                      {isFieldRequired('address') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                    </label>
+                    <input
+                      id="address"
+                      className="form-control"
+                      placeholder="House / street / village / ward"
+                      value={formData.address || ''}
+                      onChange={e => handleInputChange('address', e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('district') && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="district">
+                      District
+                      {isAutoFilled('district') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                      {isFieldRequired('district') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                    </label>
+                    <input
+                      id="district"
+                      className="form-control"
+                      placeholder="District"
+                      value={formData.district || ''}
+                      onChange={e => handleInputChange('district', e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('state') && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="state">
+                      State / UT
+                      {isAutoFilled('state') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                      {isFieldRequired('state') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                    </label>
+                    <input
+                      id="state"
+                      className="form-control"
+                      placeholder="State"
+                      value={formData.state || ''}
+                      onChange={e => handleInputChange('state', e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('pincode') && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="pincode">
+                      PIN code (6 digits)
+                      {isAutoFilled('pincode') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                      {isFieldRequired('pincode') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                    </label>
+                    <input
+                      id="pincode"
+                      maxLength={6}
+                      className="form-control"
+                      placeholder="6-digit PIN"
+                      value={formData.pincode || ''}
+                      onChange={e => handleInputChange('pincode', e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('aadhaar') && (
+                  <div className="form-group">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label className="form-label" htmlFor="aadhaar">
+                        Aadhaar (12 digits)
+                        {isAutoFilled('aadhaar') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                        {isFieldRequired('aadhaar') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowAadhaar(!showAadhaar)}
+                        style={{ color: 'var(--text-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        {showAadhaar ? <EyeOff size={13} /> : <Eye size={13} />}
+                        {showAadhaar ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
+                    <input
+                      id="aadhaar"
+                      type={showAadhaar ? 'text' : 'password'}
+                      maxLength={12}
+                      className="form-control"
+                      placeholder="12 digits"
+                      value={formData.aadhaar || ''}
+                      onChange={e => handleInputChange('aadhaar', e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('voterId') && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="voterId">
+                      Voter ID / EPIC
+                      {isFieldRequired('voterId') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                    </label>
+                    <input
+                      id="voterId"
+                      className="form-control"
+                      placeholder="EPIC number"
+                      value={formData.voterId || ''}
+                      onChange={e => handleInputChange('voterId', e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('rationCard') && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="rationCard">
+                      Ration card number
+                      {isFieldRequired('rationCard') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                    </label>
+                    <input
+                      id="rationCard"
+                      className="form-control"
+                      placeholder="Ration card / Family ID"
+                      value={formData.rationCard || ''}
+                      onChange={e => handleInputChange('rationCard', e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('bankAccount') && (
+                  <div className="form-group">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label className="form-label" htmlFor="bankAccount">
+                        Bank account number
+                        {isFieldRequired('bankAccount') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowBank(!showBank)}
+                        style={{ color: 'var(--text-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        {showBank ? <EyeOff size={13} /> : <Eye size={13} />}
+                        {showBank ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
+                    <input
+                      id="bankAccount"
+                      type={showBank ? 'text' : 'password'}
+                      className="form-control"
+                      placeholder="Only if required for DBT"
+                      value={formData.bankAccount || ''}
+                      onChange={e => handleInputChange('bankAccount', e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('ifsc') && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="ifsc">
+                      IFSC code (11 characters)
+                      {isAutoFilled('ifsc') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                      {isFieldRequired('ifsc') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                    </label>
+                    <input
+                      id="ifsc"
+                      maxLength={11}
+                      className="form-control"
+                      placeholder="e.g. SBIN0001234"
+                      value={formData.ifsc || ''}
+                      onChange={e => handleInputChange('ifsc', e.target.value.toUpperCase())}
+                    />
+                  </div>
+                )}
               </div>
-              <input
-                id="bankAccount"
-                type={showBank ? 'text' : 'password'}
-                className="form-control"
-                placeholder="Only if required for DBT"
-                value={formData.bankAccount || ''}
-                onChange={e => handleInputChange('bankAccount', e.target.value)}
-              />
-            </div>
 
-            <div className="form-group">
-              <label className="form-label" htmlFor="ifsc">
-                IFSC code (11 characters)
-                {isAutoFilled('ifsc') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                {isFieldRequiredByService('ifsc') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
-              </label>
-              <input
-                id="ifsc"
-                maxLength={11}
-                className="form-control"
-                placeholder="e.g. SBIN0001234"
-                value={formData.ifsc || ''}
-                onChange={e => handleInputChange('ifsc', e.target.value.toUpperCase())}
-              />
-            </div>
-          </div>
+              {hiddenFields.length > 0 && (
+                <div style={{ marginTop: '16px', padding: '10px 14px', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-main)', border: '1px dashed var(--border-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    {showAllOptionalFields
+                      ? 'Showing all available fields.'
+                      : `${hiddenFields.length} unrequired field(s) hidden to streamline entry.`}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setShowAllOptionalFields(!showAllOptionalFields)}
+                    style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                  >
+                    {showAllOptionalFields ? '▲ Hide non-required fields' : `+ Show ${hiddenFields.length} optional / extra field(s)`}
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.8rem' }}>1</span>
+                <h2 style={{ fontSize: '1.1rem' }}>Demographics & Contact</h2>
+              </div>
+
+              <div className="form-grid">
+                <div className="form-group full">
+                  <label className="form-label" htmlFor="fullName">
+                    Full name *
+                    {isAutoFilled('fullName') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                  </label>
+                  <input
+                    id="fullName"
+                    className="form-control"
+                    placeholder="Name as printed on original document"
+                    value={formData.fullName || ''}
+                    onChange={e => handleInputChange('fullName', e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="dob">
+                    Date of birth
+                    {isAutoFilled('dob') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                  </label>
+                  <input
+                    id="dob"
+                    type="date"
+                    className="form-control"
+                    value={formData.dob || ''}
+                    onChange={e => handleInputChange('dob', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="gender">
+                    Gender
+                    {isAutoFilled('gender') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                  </label>
+                  <select
+                    id="gender"
+                    className="form-control"
+                    value={formData.gender || ''}
+                    onChange={e => handleInputChange('gender', e.target.value)}
+                  >
+                    <option value="">Select gender…</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Transgender">Transgender</option>
+                    <option value="Prefer not to say">Prefer not to say</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="mobile">
+                    Mobile number (10 digits)
+                    {isAutoFilled('mobile') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                  </label>
+                  <input
+                    id="mobile"
+                    type="tel"
+                    maxLength={10}
+                    className="form-control"
+                    placeholder="10-digit phone"
+                    value={formData.mobile || ''}
+                    onChange={e => handleInputChange('mobile', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="email">Email address</label>
+                  <input
+                    id="email"
+                    type="email"
+                    className="form-control"
+                    placeholder="Optional"
+                    value={formData.email || ''}
+                    onChange={e => handleInputChange('email', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group full">
+                  <label className="form-label" htmlFor="address">
+                    Address
+                    {isAutoFilled('address') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                  </label>
+                  <input
+                    id="address"
+                    className="form-control"
+                    placeholder="House / street / village / ward"
+                    value={formData.address || ''}
+                    onChange={e => handleInputChange('address', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="district">
+                    District
+                    {isAutoFilled('district') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                  </label>
+                  <input
+                    id="district"
+                    className="form-control"
+                    placeholder="District"
+                    value={formData.district || ''}
+                    onChange={e => handleInputChange('district', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="state">
+                    State / UT
+                    {isAutoFilled('state') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                  </label>
+                  <input
+                    id="state"
+                    className="form-control"
+                    placeholder="State"
+                    value={formData.state || ''}
+                    onChange={e => handleInputChange('state', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="pincode">
+                    PIN code (6 digits)
+                    {isAutoFilled('pincode') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                  </label>
+                  <input
+                    id="pincode"
+                    maxLength={6}
+                    className="form-control"
+                    placeholder="6-digit PIN"
+                    value={formData.pincode || ''}
+                    onChange={e => handleInputChange('pincode', e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div style={{ margin: '24px 0', borderTop: '1px solid var(--border-light)' }} />
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.8rem' }}>2</span>
+                <div>
+                  <h2 style={{ fontSize: '1.1rem' }}>Identifiers (Only when required)</h2>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Masked outside editing. Stored only in local encrypted vault.</p>
+                </div>
+              </div>
+
+              <div className="form-grid">
+                <div className="form-group">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label className="form-label" htmlFor="aadhaar">
+                      Aadhaar (12 digits)
+                      {isAutoFilled('aadhaar') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowAadhaar(!showAadhaar)}
+                      style={{ color: 'var(--text-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      {showAadhaar ? <EyeOff size={13} /> : <Eye size={13} />}
+                      {showAadhaar ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                  <input
+                    id="aadhaar"
+                    type={showAadhaar ? 'text' : 'password'}
+                    maxLength={12}
+                    className="form-control"
+                    placeholder="12 digits — only if portal requires it"
+                    value={formData.aadhaar || ''}
+                    onChange={e => handleInputChange('aadhaar', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="voterId">Voter ID / EPIC</label>
+                  <input
+                    id="voterId"
+                    className="form-control"
+                    placeholder="EPIC number"
+                    value={formData.voterId || ''}
+                    onChange={e => handleInputChange('voterId', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="rationCard">
+                    Ration card number
+                  </label>
+                  <input
+                    id="rationCard"
+                    className="form-control"
+                    placeholder="Ration card / Family ID"
+                    value={formData.rationCard || ''}
+                    onChange={e => handleInputChange('rationCard', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label className="form-label" htmlFor="bankAccount">
+                      Bank account number
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowBank(!showBank)}
+                      style={{ color: 'var(--text-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      {showBank ? <EyeOff size={13} /> : <Eye size={13} />}
+                      {showBank ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                  <input
+                    id="bankAccount"
+                    type={showBank ? 'text' : 'password'}
+                    className="form-control"
+                    placeholder="Only if required for DBT"
+                    value={formData.bankAccount || ''}
+                    onChange={e => handleInputChange('bankAccount', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="ifsc">
+                    IFSC code (11 characters)
+                    {isAutoFilled('ifsc') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
+                  </label>
+                  <input
+                    id="ifsc"
+                    maxLength={11}
+                    className="form-control"
+                    placeholder="e.g. SBIN0001234"
+                    value={formData.ifsc || ''}
+                    onChange={e => handleInputChange('ifsc', e.target.value.toUpperCase())}
+                  />
+                </div>
+              </div>
+            </>
+          )}
 
           <div style={{ margin: '24px 0', borderTop: '1px solid var(--border-light)' }} />
 

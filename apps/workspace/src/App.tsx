@@ -36,7 +36,7 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     feeVerifiedAt: new Date().toISOString(),
     maxUploadMB: 0.1,
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
-    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'pincode', 'rationCard'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'district', 'state', 'pincode', 'rationCard'],
     adapterId: 'edistrict-up',
     notes: 'Official portal fee ₹15. Photo ≤ 20KB, self-declaration ≤ 100KB.'
   },
@@ -51,9 +51,39 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     feeVerifiedAt: new Date().toISOString(),
     maxUploadMB: 0.1,
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
-    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'pincode', 'aadhaar'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'district', 'state', 'pincode', 'aadhaar'],
     adapterId: 'edistrict-up',
     notes: 'Official fee ₹15. Caste verification and self-declaration required.'
+  },
+  {
+    id: 'srv-up-domicile',
+    name: 'Domicile / Residence Certificate (निवास प्रमाण पत्र)',
+    department: 'Revenue Department / UP e-District',
+    portalUrl: 'https://edistrict.up.gov.in',
+    officialFee: 15,
+    operatorCharge: 30,
+    feeSourceUrl: 'https://edistrict.up.gov.in/edistrictup/FeeDetails.html',
+    feeVerifiedAt: new Date().toISOString(),
+    maxUploadMB: 0.1,
+    allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'district', 'state', 'pincode', 'aadhaar'],
+    adapterId: 'edistrict-up',
+    notes: 'Official fee ₹15. Electricity bill, ration card or school certificate required.'
+  },
+  {
+    id: 'srv-pm-kisan',
+    name: 'PM-Kisan Samman Nidhi eKYC & Registration (पीएम किसान)',
+    department: 'Department of Agriculture & Farmers Welfare',
+    portalUrl: 'https://pmkisan.gov.in',
+    officialFee: 0,
+    operatorCharge: 20,
+    feeSourceUrl: 'https://pmkisan.gov.in',
+    feeVerifiedAt: new Date().toISOString(),
+    maxUploadMB: 2.0,
+    allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'pincode', 'aadhaar', 'bankAccount', 'ifsc'],
+    adapterId: 'pm-kisan',
+    notes: 'Official portal fee is FREE (₹0). Aadhaar-linked bank account required for DBT transfer.'
   },
   {
     id: 'srv-parivahan-dl',
@@ -66,24 +96,114 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     feeVerifiedAt: new Date().toISOString(),
     maxUploadMB: 0.5,
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
-    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'pincode', 'aadhaar'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'district', 'state', 'pincode', 'aadhaar'],
     adapterId: 'parivahan-sarathi',
     notes: 'Official fee ₹200. Age and address proofs required.'
   },
   {
-    id: 'srv-pm-kisan',
-    name: 'PM-Kisan Samman Nidhi eKYC & Registration',
-    department: 'Department of Agriculture & Farmers Welfare',
-    portalUrl: 'https://pmkisan.gov.in',
+    id: 'srv-parivahan-renew',
+    name: 'Driving License Renewal & Address Change (डीएल नवीनीकरण)',
+    department: 'Ministry of Road Transport & Highways / Sarathi',
+    portalUrl: 'https://sarathi.parivahan.gov.in',
+    officialFee: 200,
+    operatorCharge: 50,
+    feeSourceUrl: 'https://parivahan.gov.in/parivahan/en/content/fees-user-charges',
+    feeVerifiedAt: new Date().toISOString(),
+    maxUploadMB: 0.5,
+    allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'district', 'state', 'pincode', 'aadhaar'],
+    adapterId: 'parivahan-sarathi',
+    notes: 'Official fee ₹200. Existing DL number, medical certificate (Form 1A if >40 yrs).'
+  },
+  {
+    id: 'srv-ayushman-pmjay',
+    name: 'Ayushman Bharat Golden Health Card (आयुष्मान कार्ड)',
+    department: 'National Health Authority (NHA) / PM-JAY',
+    portalUrl: 'https://beneficiary.nha.gov.in',
     officialFee: 0,
-    operatorCharge: 20,
-    feeSourceUrl: 'https://pmkisan.gov.in',
+    operatorCharge: 30,
+    feeSourceUrl: 'https://pmjay.gov.in',
+    feeVerifiedAt: new Date().toISOString(),
+    maxUploadMB: 1.0,
+    allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'state', 'district', 'pincode', 'aadhaar', 'rationCard'],
+    adapterId: 'ayushman-pmjay',
+    notes: 'Official fee FREE (₹0). Eligible families under SECC / NFSA Ration Card.'
+  },
+  {
+    id: 'srv-nsp-scholarship',
+    name: 'National Scholarship Portal - Post/Pre Matric (छात्रवृत्ति)',
+    department: 'Ministry of Electronics & IT / NSP',
+    portalUrl: 'https://scholarships.gov.in',
+    officialFee: 0,
+    operatorCharge: 40,
+    feeSourceUrl: 'https://scholarships.gov.in',
+    feeVerifiedAt: new Date().toISOString(),
+    maxUploadMB: 1.0,
+    allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'email', 'pincode', 'aadhaar', 'bankAccount', 'ifsc'],
+    adapterId: 'nsp-scholarship',
+    notes: 'Official fee FREE (₹0). Student Aadhaar, Marksheet, and Bank passbook required.'
+  },
+  {
+    id: 'srv-epfo-uan',
+    name: 'EPFO UAN Member eKYC & Passbook (ईपीएफओ सदस्य सेवा)',
+    department: 'Employees Provident Fund Organisation',
+    portalUrl: 'https://unifiedportal-mem.epfindia.gov.in',
+    officialFee: 0,
+    operatorCharge: 30,
+    feeSourceUrl: 'https://epfindia.gov.in',
+    feeVerifiedAt: new Date().toISOString(),
+    maxUploadMB: 1.0,
+    allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'aadhaar', 'bankAccount', 'ifsc'],
+    adapterId: 'epfo-uan',
+    notes: 'Official fee FREE (₹0). Aadhaar OTP authentication and bank account linking.'
+  },
+  {
+    id: 'srv-voter-nvsp',
+    name: 'ECI Voter Portal - Form 6 New Voter ID (मतदाता पहचान पत्र)',
+    department: 'Election Commission of India / Voter Services',
+    portalUrl: 'https://voters.eci.gov.in',
+    officialFee: 0,
+    operatorCharge: 25,
+    feeSourceUrl: 'https://voters.eci.gov.in',
     feeVerifiedAt: new Date().toISOString(),
     maxUploadMB: 2.0,
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
-    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'aadhaar', 'bankAccount', 'ifsc', 'pincode'],
-    adapterId: 'pm-kisan',
-    notes: 'Official portal fee is FREE (₹0). Aadhaar-linked bank account required for DBT transfer.'
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'district', 'state', 'pincode', 'aadhaar'],
+    adapterId: 'eci-voter',
+    notes: 'Official fee FREE (₹0). Age 18+ declaration and address proof required.'
+  },
+  {
+    id: 'srv-ration-nfsa',
+    name: 'NFSA Ration Card - Member Addition & eKYC (राशन कार्ड)',
+    department: 'Food & Civil Supplies Department',
+    portalUrl: 'https://nfsa.gov.in',
+    officialFee: 0,
+    operatorCharge: 30,
+    feeSourceUrl: 'https://nfsa.gov.in',
+    feeVerifiedAt: new Date().toISOString(),
+    maxUploadMB: 1.0,
+    allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'pincode', 'aadhaar', 'rationCard'],
+    adapterId: 'nfsa-ration',
+    notes: 'Official fee FREE (₹0). Head of family ration card number and member Aadhaar.'
+  },
+  {
+    id: 'srv-jeevan-pramaan',
+    name: 'Jeevan Pramaan - Digital Life Certificate (जीवन प्रमाण पत्र)',
+    department: 'Department of Pension & Pensioners Welfare',
+    portalUrl: 'https://jeevanpramaan.gov.in',
+    officialFee: 0,
+    operatorCharge: 20,
+    feeSourceUrl: 'https://jeevanpramaan.gov.in',
+    feeVerifiedAt: new Date().toISOString(),
+    maxUploadMB: 1.0,
+    allowedExtensions: ['pdf', 'jpg', 'jpeg'],
+    requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'aadhaar', 'bankAccount', 'ifsc'],
+    adapterId: 'jeevan-pramaan',
+    notes: 'Official fee FREE (₹0). Biometric / Iris authentication for pensioner DLC.'
   }
 ];
 
@@ -254,7 +374,15 @@ export const App: React.FC = () => {
       setVaultSalt(salt);
       setProfile(data.profile || profile);
       setCitizens(data.citizens || []);
-      setServices((data.services && data.services.length > 0) ? data.services : DEFAULT_SERVICES);
+      // Merge any new default services not yet in the vault
+      const existingServices: ServiceDefinition[] = data.services || [];
+      const mergedServices = [...existingServices];
+      for (const def of DEFAULT_SERVICES) {
+        if (!mergedServices.some(s => s.id === def.id)) {
+          mergedServices.push(def);
+        }
+      }
+      setServices(mergedServices.length > 0 ? mergedServices : DEFAULT_SERVICES);
       setApplications(data.applications || []);
       setAuditEvents(data.audit || []);
       setIsLocked(false);
