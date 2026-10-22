@@ -7,7 +7,9 @@ interface ApplicationsProps {
   citizens: Citizen[];
   services: ServiceDefinition[];
   onOpenApplication: (appId: string) => void;
+  onLaunchPortal?: (appId: string) => void;
   onNewApplication: () => void;
+  onDeliverCertificate?: (appId: string, certRef: string, note?: string) => Promise<void> | void;
 }
 
 export const Applications: React.FC<ApplicationsProps> = ({
@@ -15,7 +17,9 @@ export const Applications: React.FC<ApplicationsProps> = ({
   citizens,
   services,
   onOpenApplication,
-  onNewApplication
+  onLaunchPortal,
+  onNewApplication,
+  onDeliverCertificate
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -93,7 +97,7 @@ export const Applications: React.FC<ApplicationsProps> = ({
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <strong style={{ fontSize: '1rem', letterSpacing: '-0.01em' }}>
-                  Off-Peak Burst Submission Queue Active
+                  Cases Ready for Portal Submission
                 </strong>
                 <span
                   style={{
@@ -109,7 +113,7 @@ export const Applications: React.FC<ApplicationsProps> = ({
                 </span>
               </div>
               <p style={{ fontSize: '0.825rem', opacity: 0.9, marginTop: '2px' }}>
-                Portals congested or timed out during the day? These cases have 100% preflight validation and citizen consent. Burst-submit them instantly via the Companion Extension once server traffic clears.
+                These cases have completed preflight verification and citizen consent, ready for 1-click submission on official government portals.
               </p>
             </div>
           </div>
@@ -127,18 +131,22 @@ export const Applications: React.FC<ApplicationsProps> = ({
               <Filter size={14} />
               {statusFilter === 'ready' ? 'Showing Ready Queue' : 'View Ready Cases'}
             </button>
-            <button
-              className="btn"
-              style={{
-                backgroundColor: '#95d5b2',
-                color: '#081c15',
-                fontSize: '0.8rem',
-                fontWeight: 700
-              }}
-              onClick={() => onOpenApplication(readyApps[0].id)}
-            >
-              Launch Next Ready Case <ArrowRight size={14} />
-            </button>
+              <button
+                className="btn"
+                style={{
+                  backgroundColor: '#95d5b2',
+                  color: '#081c15',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+                onClick={() => onLaunchPortal ? onLaunchPortal(readyApps[0].id) : onOpenApplication(readyApps[0].id)}
+              >
+                <Zap size={13} />
+                Launch Next Ready Case <ArrowRight size={14} />
+              </button>
           </div>
         </div>
       )}
@@ -152,8 +160,39 @@ export const Applications: React.FC<ApplicationsProps> = ({
             </p>
           </div>
 
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className={`btn btn-xs ${statusFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setStatusFilter('all')}
+            >
+              All ({applications.length})
+            </button>
+            <button
+              type="button"
+              className={`btn btn-xs ${statusFilter === 'ready' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setStatusFilter('ready')}
+            >
+              ⚡ Ready ({applications.filter(a => a.status === 'ready').length})
+            </button>
+            <button
+              type="button"
+              className={`btn btn-xs ${statusFilter === 'submitted' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setStatusFilter('submitted')}
+            >
+              📜 Pending Delivery ({applications.filter(a => a.status === 'submitted').length})
+            </button>
+            <button
+              type="button"
+              className={`btn btn-xs ${statusFilter === 'closed' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setStatusFilter('closed')}
+            >
+              ✓ Closed ({applications.filter(a => a.status === 'closed').length})
+            </button>
+          </div>
+
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-            <div style={{ position: 'relative', minWidth: '260px' }}>
+            <div style={{ position: 'relative', minWidth: '240px' }}>
               <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
               <input
                 className="form-control"
@@ -226,9 +265,40 @@ export const Applications: React.FC<ApplicationsProps> = ({
                         </span>
                       </td>
                       <td>
-                        <span className={`status-pill ${app.status}`}>
-                          • {app.status.replace('_', ' ')}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span className={`status-pill ${app.status}`}>
+                            • {app.status.replace('_', ' ')}
+                          </span>
+                          {app.feeStatus === 'collected' ? (
+                            <span style={{
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              backgroundColor: '#dcfce7',
+                              color: '#166534',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }} title="Cash fee collected from citizen">
+                              ✓ Paid
+                            </span>
+                          ) : (
+                            <span style={{
+                              fontSize: '0.72rem',
+                              fontWeight: 600,
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              backgroundColor: '#fef3c7',
+                              color: '#92400e',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }} title="Statutory cash fee pending collection">
+                              ⏳ Fee Due
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td>
                         {app.preflight ? (
@@ -249,9 +319,36 @@ export const Applications: React.FC<ApplicationsProps> = ({
                         {new Date(app.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        <button className="btn btn-secondary btn-xs" onClick={() => onOpenApplication(app.id)}>
-                          Open <ArrowRight size={12} />
-                        </button>
+                        <div style={{ display: 'inline-flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                          {app.status === 'ready' && (
+                            <button
+                              className="btn btn-primary btn-xs"
+                              onClick={() => onLaunchPortal ? onLaunchPortal(app.id) : onOpenApplication(app.id)}
+                              style={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              title="1-Click Launch into State Portal Simulator"
+                            >
+                              <Zap size={11} /> Launch ↗
+                            </button>
+                          )}
+                          {app.status === 'submitted' && onDeliverCertificate && (
+                            <button
+                              className="btn btn-primary btn-xs"
+                              onClick={() => {
+                                const certRef = window.prompt(`Enter issued certificate number for ${citizen?.fullName || 'citizen'}:`, `CERT-${app.receiptRef?.slice(-8) || '2026'}`);
+                                if (certRef && certRef.trim()) {
+                                  onDeliverCertificate(app.id, certRef.trim());
+                                }
+                              }}
+                              style={{ backgroundColor: '#059669', borderColor: '#059669', color: '#ffffff', fontWeight: 700 }}
+                              title="Deliver Government Certificate to Citizen & Seal Case"
+                            >
+                              ✓ Deliver Cert
+                            </button>
+                          )}
+                          <button className="btn btn-secondary btn-xs" onClick={() => onOpenApplication(app.id)}>
+                            Open <ArrowRight size={12} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

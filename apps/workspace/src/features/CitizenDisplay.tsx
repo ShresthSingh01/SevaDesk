@@ -12,18 +12,39 @@ interface CitizenDisplayProps {
 export const CitizenDisplay: React.FC<CitizenDisplayProps> = ({ service, onClose }) => {
   const [lang, setLang] = useState('hi-IN');
   const [loading, setLoading] = useState(false);
+  const [syncedService, setSyncedService] = useState<ServiceDefinition | undefined>(service);
+  const [syncedCitizenName, setSyncedCitizenName] = useState<string | null>(null);
 
-  const official = service?.officialFee;
-  const operator = service?.operatorCharge;
+  React.useEffect(() => {
+    setSyncedService(service);
+  }, [service]);
+
+  React.useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'seva_citizen_display_sync' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed.service) setSyncedService(parsed.service);
+          if (parsed.citizenName !== undefined) setSyncedCitizenName(parsed.citizenName);
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  const activeService = syncedService || service;
+  const official = activeService?.officialFee;
+  const operator = activeService?.operatorCharge;
   const total = official !== null && official !== undefined && operator !== null && operator !== undefined
     ? Number(official) + Number(operator)
     : null;
 
   const handleSpeak = async () => {
-    if (!service) return;
+    if (!activeService) return;
     setLoading(true);
     try {
-      await playFeeSpeech(service.name, official, operator, lang);
+      await playFeeSpeech(activeService.name, official, operator, lang);
     } catch {
       // Ignored
     } finally {
@@ -31,7 +52,7 @@ export const CitizenDisplay: React.FC<CitizenDisplayProps> = ({ service, onClose
     }
   };
 
-  if (!service) return null;
+  if (!activeService) return null;
 
   return (
     <div style={{
@@ -63,6 +84,11 @@ export const CitizenDisplay: React.FC<CitizenDisplayProps> = ({ service, onClose
           <div>
             <h1 style={{ fontSize: '1.6rem', color: '#ffffff', lineHeight: 1.1 }}>SevaDesk · Citizen Transparency Display</h1>
             <span style={{ fontSize: '0.9rem', color: '#95d5b2' }}>Official service fee & operator charge breakdown</span>
+            {syncedCitizenName && (
+              <span style={{ fontSize: '0.85rem', color: '#a7f3d0', display: 'block', marginTop: '3px' }}>
+                👤 Applicant: <strong>{syncedCitizenName}</strong>
+              </span>
+            )}
           </div>
         </div>
 
@@ -99,7 +125,7 @@ export const CitizenDisplay: React.FC<CitizenDisplayProps> = ({ service, onClose
           SERVICE FEE DECLARATION
         </div>
         <h2 style={{ fontSize: '2.4rem', color: '#ffffff', fontWeight: 800, marginBottom: '32px' }}>
-          {service.name}
+          {activeService.name}
         </h2>
 
         {/* Dual Line Items */}

@@ -3,7 +3,11 @@ import {
   Citizen, 
   ServiceDefinition, 
   Application, 
-  AuditEvent 
+  ApplicationDocument,
+  AuditEvent,
+  validateStatusTransition,
+  isCitizenLocked,
+  buildApplicationPayload
 } from '@sevadesk/core-types';
 import { 
   deriveVaultKey, 
@@ -14,7 +18,7 @@ import {
 import { LockScreen } from './components/LockScreen';
 import { Sidebar, PageId } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
-import { checkDaemonHealth, syncCitizenToDaemon, syncServiceToDaemon, syncApplicationToDaemon } from './lib/api';
+import { checkDaemonHealth, syncCitizenToDaemon, syncServiceToDaemon, syncApplicationToDaemon, pushBridgeSession } from './lib/api';
 import { Overview } from './features/Overview';
 import { CitizenIntake } from './features/CitizenIntake';
 import { Applications } from './features/Applications';
@@ -23,6 +27,9 @@ import { FeeTransparency } from './features/FeeTransparency';
 import { CitizenDisplay } from './features/CitizenDisplay';
 import { ServicesRules } from './features/ServicesRules';
 import { AuditTrail } from './features/AuditTrail';
+import { PortalSimulator } from './features/PortalSimulator';
+import { CitizenReceiptModal } from './components/CitizenReceiptModal';
+import { PortalHandoffModal } from './components/PortalHandoffModal';
 
 export const DEFAULT_SERVICES: ServiceDefinition[] = [
   {
@@ -38,7 +45,20 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
     requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'district', 'state', 'pincode', 'rationCard'],
     adapterId: 'edistrict-up',
-    notes: 'Official portal fee ₹15. Photo ≤ 20KB, self-declaration ≤ 100KB.'
+    notes: 'Official portal fee ₹15. Photo ≤ 20KB, self-declaration ≤ 100KB.',
+    documentSlots: [
+      { id: 'photo', label: 'Applicant Photograph (पासपोर्ट फ़ोटो)', maxKB: 20, allowedExtensions: ['jpg', 'jpeg'], required: true, description: 'Passport size color photograph (Strictly ≤ 20 KB)' },
+      { 
+        id: 'declaration', 
+        label: 'Self-Declaration / Income Proof (स्वप्रमाणित घोषणा)', 
+        maxKB: 100, 
+        allowedExtensions: ['pdf', 'jpg', 'jpeg'], 
+        required: true, 
+        description: 'Tehsildar income declaration or certified affidavit (≤ 100 KB)',
+        proformaType: 'self_declaration',
+        proformaTitle: 'स्वप्रमाणित घोषणा पत्र (आय प्रमाण पत्र हेतु)'
+      }
+    ]
   },
   {
     id: 'srv-up-caste',
@@ -53,7 +73,21 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
     requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'district', 'state', 'pincode', 'aadhaar'],
     adapterId: 'edistrict-up',
-    notes: 'Official fee ₹15. Caste verification and self-declaration required.'
+    notes: 'Official fee ₹15. Caste verification and self-declaration required.',
+    documentSlots: [
+      { id: 'photo', label: 'Applicant Photograph (पासपोर्ट फ़ोटो)', maxKB: 20, allowedExtensions: ['jpg', 'jpeg'], required: true, description: 'Passport size color photograph (≤ 20 KB)' },
+      { 
+        id: 'declaration', 
+        label: 'Self-Declaration Form (स्वप्रमाणित घोषणा पत्र)', 
+        maxKB: 100, 
+        allowedExtensions: ['pdf', 'jpg', 'jpeg'], 
+        required: true, 
+        description: 'Mandatory applicant caste declaration proforma (≤ 100 KB)',
+        proformaType: 'caste_declaration',
+        proformaTitle: 'स्वप्रमाणित घोषणा पत्र (जाति प्रमाण पत्र हेतु)'
+      },
+      { id: 'casteProof', label: 'Caste Proof / Verification (जाति प्रमाण पत्र)', maxKB: 100, allowedExtensions: ['pdf', 'jpg', 'jpeg'], required: false, description: 'Gram Pradhan / Parshad certificate or family caste copy (≤ 100 KB)' }
+    ]
   },
   {
     id: 'srv-up-domicile',
@@ -68,7 +102,21 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
     requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'district', 'state', 'pincode', 'aadhaar'],
     adapterId: 'edistrict-up',
-    notes: 'Official fee ₹15. Electricity bill, ration card or school certificate required.'
+    notes: 'Official fee ₹15. Electricity bill, ration card or school certificate required.',
+    documentSlots: [
+      { id: 'photo', label: 'Applicant Photograph (पासपोर्ट फ़ोटो)', maxKB: 20, allowedExtensions: ['jpg', 'jpeg'], required: true, description: 'Passport size color photograph (≤ 20 KB)' },
+      { 
+        id: 'declaration', 
+        label: 'Self-Declaration Form (स्वप्रमाणित घोषणा पत्र)', 
+        maxKB: 100, 
+        allowedExtensions: ['pdf', 'jpg', 'jpeg'], 
+        required: true, 
+        description: 'Domicile self-declaration proforma (≤ 100 KB)',
+        proformaType: 'self_declaration',
+        proformaTitle: 'स्वप्रमाणित घोषणा पत्र (निवास प्रमाण पत्र हेतु)'
+      },
+      { id: 'residenceProof', label: 'Residence / Address Proof (निवास प्रमाण)', maxKB: 100, allowedExtensions: ['pdf', 'jpg', 'jpeg'], required: false, description: 'Electricity bill, ration card, or voter ID (≤ 100 KB)' }
+    ]
   },
   {
     id: 'srv-pm-kisan',
@@ -83,7 +131,10 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
     requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'pincode', 'aadhaar', 'bankAccount', 'ifsc'],
     adapterId: 'pm-kisan',
-    notes: 'Official portal fee is FREE (₹0). Aadhaar-linked bank account required for DBT transfer.'
+    notes: 'Official portal fee is FREE (₹0). Aadhaar-linked bank account required for DBT transfer.',
+    documentSlots: [
+      { id: 'bankPassbook', label: 'Bank Passbook / Land Document (खतौनी / पासबुक)', maxKB: 2000, allowedExtensions: ['pdf', 'jpg', 'jpeg'], required: true, description: 'Land Khatauni or Aadhaar-linked bank passbook (≤ 2 MB)' }
+    ]
   },
   {
     id: 'srv-parivahan-dl',
@@ -98,7 +149,11 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
     requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'district', 'state', 'pincode', 'aadhaar'],
     adapterId: 'parivahan-sarathi',
-    notes: 'Official fee ₹200. Age and address proofs required.'
+    notes: 'Official fee ₹200. Age and address proofs required.',
+    documentSlots: [
+      { id: 'photo', label: 'Applicant Photograph (पासपोर्ट फ़ोटो)', maxKB: 500, allowedExtensions: ['jpg', 'jpeg'], required: true, description: 'Clear frontal passport photograph (≤ 500 KB)' },
+      { id: 'ageAddressProof', label: 'Age & Address Proof (आयु एवं निवास प्रमाण)', maxKB: 500, allowedExtensions: ['pdf', 'jpg', 'jpeg'], required: true, description: '10th marksheet or Aadhaar / Voter card (≤ 500 KB)' }
+    ]
   },
   {
     id: 'srv-parivahan-renew',
@@ -113,7 +168,10 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
     requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'district', 'state', 'pincode', 'aadhaar'],
     adapterId: 'parivahan-sarathi',
-    notes: 'Official fee ₹200. Existing DL number, medical certificate (Form 1A if >40 yrs).'
+    notes: 'Official fee ₹200. Existing DL number, medical certificate (Form 1A if >40 yrs).',
+    documentSlots: [
+      { id: 'existingDL', label: 'Existing Driving License (मौजूदा डीएल प्रति)', maxKB: 500, allowedExtensions: ['pdf', 'jpg', 'jpeg'], required: true, description: 'Front & back scan of existing Driving License (≤ 500 KB)' }
+    ]
   },
   {
     id: 'srv-ayushman-pmjay',
@@ -128,7 +186,10 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
     requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'state', 'district', 'pincode', 'aadhaar', 'rationCard'],
     adapterId: 'ayushman-pmjay',
-    notes: 'Official fee FREE (₹0). Eligible families under SECC / NFSA Ration Card.'
+    notes: 'Official fee FREE (₹0). Eligible families under SECC / NFSA Ration Card.',
+    documentSlots: [
+      { id: 'rationCardProof', label: 'Ration Card / NFSA Document (राशन कार्ड)', maxKB: 1000, allowedExtensions: ['pdf', 'jpg', 'jpeg'], required: true, description: 'Active NFSA Ration Card or PM-JAY Family letter (≤ 1 MB)' }
+    ]
   },
   {
     id: 'srv-nsp-scholarship',
@@ -143,7 +204,11 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
     requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'email', 'pincode', 'aadhaar', 'bankAccount', 'ifsc'],
     adapterId: 'nsp-scholarship',
-    notes: 'Official fee FREE (₹0). Student Aadhaar, Marksheet, and Bank passbook required.'
+    notes: 'Official fee FREE (₹0). Student Aadhaar, Marksheet, and Bank passbook required.',
+    documentSlots: [
+      { id: 'marksheet', label: 'Previous Exam Marksheet (अंकतालिका)', maxKB: 1000, allowedExtensions: ['pdf', 'jpg', 'jpeg'], required: true, description: 'Passed exam marksheet (≤ 1 MB)' },
+      { id: 'bankPassbook', label: 'Student Bank Passbook (बैंक पासबुक)', maxKB: 1000, allowedExtensions: ['pdf', 'jpg', 'jpeg'], required: true, description: 'Student self-account passbook (≤ 1 MB)' }
+    ]
   },
   {
     id: 'srv-epfo-uan',
@@ -158,7 +223,10 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
     requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'aadhaar', 'bankAccount', 'ifsc'],
     adapterId: 'epfo-uan',
-    notes: 'Official fee FREE (₹0). Aadhaar OTP authentication and bank account linking.'
+    notes: 'Official fee FREE (₹0). Aadhaar OTP authentication and bank account linking.',
+    documentSlots: [
+      { id: 'panBankProof', label: 'Cancelled Cheque / Bank Passbook (चेक / पासबुक)', maxKB: 1000, allowedExtensions: ['pdf', 'jpg', 'jpeg'], required: false, description: 'Bank proof for KYC validation (≤ 1 MB)' }
+    ]
   },
   {
     id: 'srv-voter-nvsp',
@@ -173,7 +241,11 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
     requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'district', 'state', 'pincode', 'aadhaar'],
     adapterId: 'eci-voter',
-    notes: 'Official fee FREE (₹0). Age 18+ declaration and address proof required.'
+    notes: 'Official fee FREE (₹0). Age 18+ declaration and address proof required.',
+    documentSlots: [
+      { id: 'photo', label: 'Passport Photograph (पासपोर्ट फ़ोटो)', maxKB: 2000, allowedExtensions: ['jpg', 'jpeg'], required: true, description: 'Passport color photo (≤ 2 MB)' },
+      { id: 'ageAddressProof', label: 'Age & Address Proof (आयु एवं निवास प्रमाण)', maxKB: 2000, allowedExtensions: ['pdf', 'jpg', 'jpeg'], required: true, description: 'Age and residential proof (≤ 2 MB)' }
+    ]
   },
   {
     id: 'srv-ration-nfsa',
@@ -188,7 +260,10 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
     requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'address', 'pincode', 'aadhaar', 'rationCard'],
     adapterId: 'nfsa-ration',
-    notes: 'Official fee FREE (₹0). Head of family ration card number and member Aadhaar.'
+    notes: 'Official fee FREE (₹0). Head of family ration card number and member Aadhaar.',
+    documentSlots: [
+      { id: 'familyPhoto', label: 'Family Group Photograph (परिवार का फ़ोटो)', maxKB: 1000, allowedExtensions: ['jpg', 'jpeg'], required: true, description: 'Head of family group photograph (≤ 1 MB)' }
+    ]
   },
   {
     id: 'srv-jeevan-pramaan',
@@ -203,7 +278,10 @@ export const DEFAULT_SERVICES: ServiceDefinition[] = [
     allowedExtensions: ['pdf', 'jpg', 'jpeg'],
     requiredFields: ['fullName', 'dob', 'gender', 'mobile', 'aadhaar', 'bankAccount', 'ifsc'],
     adapterId: 'jeevan-pramaan',
-    notes: 'Official fee FREE (₹0). Biometric / Iris authentication for pensioner DLC.'
+    notes: 'Official fee FREE (₹0). Biometric / Iris authentication for pensioner DLC.',
+    documentSlots: [
+      { id: 'ppoCopy', label: 'Pension Payment Order (PPO Copy)', maxKB: 1000, allowedExtensions: ['pdf', 'jpg', 'jpeg'], required: true, description: 'PPO copy or pensioner identity card (≤ 1 MB)' }
+    ]
   }
 ];
 
@@ -239,11 +317,11 @@ export const App: React.FC = () => {
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const [selectedFeeServiceId, setSelectedFeeServiceId] = useState<string>('');
   const [selectedFeeAppId, setSelectedFeeAppId] = useState<string>('');
+  const [returnContext, setReturnContext] = useState<{ page: PageId; applicationId?: string } | null>(null);
+  const [handoffModalAppId, setHandoffModalAppId] = useState<string | null>(null);
+  const [receiptModalAppId, setReceiptModalAppId] = useState<string | null>(null);
   
-  // Modals & UI
-  const [showNewAppModal, setShowNewAppModal] = useState(false);
-  const [newAppCitizenId, setNewAppCitizenId] = useState('');
-  const [newAppServiceId, setNewAppServiceId] = useState('');
+  // Feedback
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Auto-lock timer
@@ -439,9 +517,25 @@ export const App: React.FC = () => {
     showToast('Audit CSV exported.');
   };
 
-  const handleSaveCitizen = async (citizen: Citizen, targetServiceId?: string) => {
+  const handleSaveCitizen = async (
+    citizen: Citizen, 
+    targetServiceId?: string, 
+    documents?: ApplicationDocument[],
+    rawFiles?: File[],
+    launchDirectly?: boolean,
+    feeCollected?: boolean
+  ) => {
     const isEdit = citizens.some(c => c.id === citizen.id);
     if (isEdit) {
+      if (!targetServiceId) {
+        const lockedApp = applications.find(
+          a => a.citizenId === citizen.id && (a.status === 'submitted' || a.status === 'closed')
+        );
+        if (lockedApp) {
+          showToast(`Cannot modify applicant data: Record is locked under ${lockedApp.status} case ${lockedApp.id}.`, 'error');
+          return;
+        }
+      }
       setCitizens(prev => prev.map(c => (c.id === citizen.id ? citizen : c)));
       addAuditEvent('citizen_updated', 'Updated citizen details with confirmed consent. Field values excluded.', 'citizen', citizen.id);
     } else {
@@ -459,7 +553,22 @@ export const App: React.FC = () => {
         id: `SD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`,
         citizenId: citizen.id,
         serviceId: targetServiceId,
-        status: 'draft',
+        status: 'ready', // Preflight verification completed inline in CitizenIntake before launch
+        feeStatus: feeCollected ? 'collected' : 'pending',
+        feeCollectedAt: feeCollected ? new Date().toISOString() : undefined,
+        feeReceiptNo: feeCollected ? `REC-${Date.now().toString(36).toUpperCase()}` : undefined,
+        documents: documents || [],
+        preflight: {
+          valid: true,
+          errors: [],
+          warnings: [],
+          checkedAt: new Date().toISOString(),
+          rulesSnapshot: {
+            requiredFields: targetService?.requiredFields || [],
+            maxUploadMB: targetService?.maxUploadMB || null,
+            allowedExtensions: targetService?.allowedExtensions || []
+          }
+        },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -467,12 +576,26 @@ export const App: React.FC = () => {
       if (daemonConnected) {
         syncApplicationToDaemon(newApp);
       }
-      addAuditEvent('application_created', `Application case launched directly from intake for ${targetService?.name || targetServiceId}.`, 'application', newApp.id);
+      addAuditEvent('application_created', `Application case launched directly from intake for ${targetService?.name || targetServiceId}. Fee: ${newApp.feeStatus}.`, 'application', newApp.id);
       setSelectedApplicationId(newApp.id);
-      setCurrentPage('applications');
-      showToast(`Saved citizen & launched application for ${targetService?.name?.split('(')[0].trim() || 'service'}!`);
+      setReturnContext(null);
+
+      if (launchDirectly) {
+        await handleLaunchApplicationInPortal(newApp.id, true, newApp, citizen);
+      } else {
+        setCurrentPage('applications');
+        showToast(`📥 Saved draft: ${targetService?.name?.split('(')[0].trim() || 'case'}. Ready for submission.`);
+      }
     } else {
-      setCurrentPage('overview');
+      if (returnContext) {
+        setCurrentPage(returnContext.page);
+        if (returnContext.applicationId) {
+          setSelectedApplicationId(returnContext.applicationId);
+        }
+        setReturnContext(null);
+      } else {
+        setCurrentPage('overview');
+      }
       showToast(isEdit ? 'Citizen record updated.' : 'Citizen record encrypted & saved.');
     }
   };
@@ -492,6 +615,12 @@ export const App: React.FC = () => {
   };
 
   const handleSavePreflight = async (appId: string, snapshot: any) => {
+    const existing = applications.find(a => a.id === appId);
+    if (!existing) return;
+    if (existing.status === 'submitted' || existing.status === 'closed') {
+      showToast('Cannot modify preflight: Application is already submitted or closed.', 'error');
+      return;
+    }
     let updatedApp: Application | undefined;
     setApplications(prev => prev.map(a => {
       if (a.id === appId) {
@@ -512,6 +641,15 @@ export const App: React.FC = () => {
   };
 
   const handleUpdateStatus = async (appId: string, status: string, ref?: string, note?: string) => {
+    const existingApp = applications.find(a => a.id === appId);
+    if (!existingApp) return;
+
+    const check = validateStatusTransition(existingApp.status, status);
+    if (!check.allowed) {
+      showToast(check.reason || 'Status transition not allowed.', 'error');
+      return;
+    }
+
     let updatedApp: Application | undefined;
     setApplications(prev => prev.map(a => {
       if (a.id === appId) {
@@ -529,31 +667,117 @@ export const App: React.FC = () => {
     if (daemonConnected && updatedApp) {
       syncApplicationToDaemon(updatedApp);
     }
-    addAuditEvent('status_updated', `Application status changed to ${status}. ${status === 'submitted' ? `Portal Ref: ${ref}` : ''}`, 'application', appId);
+    addAuditEvent('status_updated', `Application status changed from ${existingApp.status} to ${status}. ${status === 'submitted' ? `Portal Ref: ${ref}` : ''}`, 'application', appId);
   };
 
-  const handleCreateNewAppSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newAppCitizenId || !newAppServiceId) return;
-
-    const newApp: Application = {
-      id: `SD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`,
-      citizenId: newAppCitizenId,
-      serviceId: newAppServiceId,
-      status: 'draft',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    setApplications(prev => [newApp, ...prev]);
-    if (daemonConnected) {
-      syncApplicationToDaemon(newApp);
+  const handleUpdateFeeStatus = async (appId: string, status: 'pending' | 'collected') => {
+    let updatedApp: Application | undefined;
+    setApplications(prev => prev.map(a => {
+      if (a.id === appId) {
+        updatedApp = {
+          ...a,
+          feeStatus: status,
+          feeCollectedAt: status === 'collected' ? (a.feeCollectedAt || new Date().toISOString()) : undefined,
+          feeReceiptNo: status === 'collected' ? (a.feeReceiptNo || `REC-${Date.now().toString(36).toUpperCase()}`) : undefined,
+          updatedAt: new Date().toISOString()
+        };
+        return updatedApp;
+      }
+      return a;
+    }));
+    if (daemonConnected && updatedApp) {
+      syncApplicationToDaemon(updatedApp);
     }
-    addAuditEvent('application_created', 'Created local application case.', 'application', newApp.id);
-    setShowNewAppModal(false);
-    setSelectedApplicationId(newApp.id);
-    setCurrentPage('applications');
-    showToast('New application record created.');
+    addAuditEvent('fee_status_updated', `Fee collection status updated to "${status}" for case ${appId}.`, 'application', appId);
+    showToast(`Fee status: ${status === 'collected' ? '✓ Collected (Paid)' : '⏳ Pending'}`);
   };
+
+  const handleLaunchApplicationInPortal = async (
+    appId: string, 
+    directToSimulator: boolean = false,
+    overrideApp?: Application,
+    overrideCitizen?: Citizen
+  ) => {
+    const app = overrideApp || applications.find(a => a.id === appId);
+    if (!app) {
+      showToast(`Cannot launch: Application ${appId} not found.`, 'error');
+      return;
+    }
+    const citizen = overrideCitizen || citizens.find(c => c.id === app.citizenId);
+    const service = services.find(s => s.id === app.serviceId);
+    if (!citizen || !service) {
+      showToast(`Cannot launch: Citizen or Service definition missing.`, 'error');
+      return;
+    }
+
+    // 1. Immediately open official portal URL in new browser tab if live launch requested and URL is valid
+    if (directToSimulator && service.portalUrl && service.portalUrl.startsWith('http')) {
+      try {
+        window.open(service.portalUrl, '_blank', 'noopener,noreferrer');
+      } catch (e) {
+        console.warn('Portal window open blocked or failed:', e);
+      }
+    }
+
+    if (app.status === 'ready' || app.status === 'draft') {
+      await handleUpdateStatus(app.id, 'in_portal');
+    }
+
+    const payload = buildApplicationPayload({ ...app, status: 'in_portal' }, citizen, service);
+    (window as any).__SEVA_COMPANION_PAYLOAD__ = payload;
+    try {
+      localStorage.setItem('seva_active_bridge_payload', JSON.stringify(payload));
+    } catch {}
+
+    try {
+      await pushBridgeSession(payload);
+    } catch {}
+
+    setSelectedApplicationId(app.id);
+    if (directToSimulator) {
+      setCurrentPage('simulator');
+      showToast(`🚀 Launched ${service.name.split('(')[0].trim()}! Portal opened & simulator bridge active.`);
+    } else {
+      setHandoffModalAppId(app.id);
+    }
+  };
+
+  const handleRecordSubmission = async (receiptRef: string) => {
+    let targetApp = selectedApplicationId ? applications.find(a => a.id === selectedApplicationId) : null;
+    if (!targetApp || ['submitted', 'closed'].includes(targetApp.status)) {
+      targetApp = applications.find(a => a.status === 'in_portal' || a.status === 'ready') || applications[0];
+    }
+    if (!targetApp) return;
+
+    await handleUpdateStatus(targetApp.id, 'submitted', receiptRef, 'Confirmed and recorded from Portal Simulator.');
+    setReceiptModalAppId(targetApp.id);
+    showToast(`✓ Case ${targetApp.id} submitted! Ref: ${receiptRef}`);
+  };
+
+  const handleDeliverCertificate = async (appId: string, certRef: string, note?: string) => {
+    let updatedApp: Application | undefined;
+    setApplications(prev => prev.map(a => {
+      if (a.id === appId) {
+        updatedApp = {
+          ...a,
+          certificateRef: certRef,
+          deliveredAt: new Date().toISOString(),
+          status: 'closed',
+          statusNote: note || `Certificate ${certRef} delivered to citizen.`,
+          updatedAt: new Date().toISOString()
+        };
+        return updatedApp;
+      }
+      return a;
+    }));
+    if (daemonConnected && updatedApp) {
+      syncApplicationToDaemon(updatedApp);
+    }
+    addAuditEvent('certificate_delivered', `Certificate ${certRef} delivered and case closed.`, 'application', appId);
+    showToast(`✓ Certificate ${certRef} delivered and case sealed!`);
+  };
+
+
 
   // Standalone Dual-Screen Citizen Monitor Mode (?view=citizen)
   const isCitizenMonitorView = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'citizen';
@@ -578,6 +802,18 @@ export const App: React.FC = () => {
           window.location.href = window.location.pathname;
         }}
         daemonConnected={daemonConnected}
+      />
+    );
+  }
+
+  // Standalone State Portal Simulator Mode (?view=simulator)
+  const isSimulatorView = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'simulator';
+  if (isSimulatorView) {
+    return (
+      <PortalSimulator
+        onBackToWorkspace={() => {
+          window.location.href = window.location.pathname;
+        }}
       />
     );
   }
@@ -641,18 +877,9 @@ export const App: React.FC = () => {
         <TopBar
           currentPage={currentPage}
           onNewApplication={() => {
-            if (!citizens.length) {
-              showToast('Add a citizen record before creating an application.', 'error');
-              setEditingCitizenId(null);
-              setCurrentPage('intake');
-              return;
-            }
-            if (!services.length) {
-              showToast('Configure at least one service before creating an application.', 'error');
-              setCurrentPage('services');
-              return;
-            }
-            setShowNewAppModal(true);
+            setEditingCitizenId(null);
+            setReturnContext(null);
+            setCurrentPage('intake');
           }}
           daemonConnected={daemonConnected}
         />
@@ -665,6 +892,7 @@ export const App: React.FC = () => {
               services={services}
               onNavigate={setCurrentPage}
               onEditCitizen={id => {
+                setReturnContext({ page: 'overview' });
                 setEditingCitizenId(id);
                 setCurrentPage('intake');
               }}
@@ -672,24 +900,50 @@ export const App: React.FC = () => {
                 setSelectedApplicationId(id);
                 setCurrentPage('applications');
               }}
+              onLaunchPortal={handleLaunchApplicationInPortal}
               onCreateCaseForCitizen={id => {
-                setNewAppCitizenId(id);
-                setShowNewAppModal(true);
+                setReturnContext({ page: 'overview' });
+                setEditingCitizenId(id);
+                setCurrentPage('intake');
+              }}
+              operatorProfile={profile}
+              onUpdateProfile={(op, c) => {
+                setProfile(p => ({ ...p, operatorName: op, centreName: c }));
+                addAuditEvent('profile_updated', `Quick-updated kiosk identity: ${c} (Operator: ${op})`, 'workspace', 'local');
+                showToast('Kiosk credentials updated.');
               }}
             />
           )}
 
           {currentPage === 'intake' && (
-            <CitizenIntake
-              initialCitizen={editingCitizen}
-              services={services}
-              onSave={handleSaveCitizen}
-              onCancel={() => {
-                setEditingCitizenId(null);
-                setCurrentPage('overview');
-              }}
-              daemonConnected={daemonConnected}
-            />
+            (() => {
+              const editingCitizenLockedApp = editingCitizenId ? applications.find(
+                a => a.citizenId === editingCitizenId && (a.status === 'submitted' || a.status === 'closed')
+              ) : undefined;
+              return (
+                <CitizenIntake
+                  initialCitizen={editingCitizen}
+                  services={services}
+                  citizens={citizens}
+                  onSave={handleSaveCitizen}
+                  onCancel={() => {
+                    setEditingCitizenId(null);
+                    if (returnContext) {
+                      setCurrentPage(returnContext.page);
+                      if (returnContext.applicationId) {
+                        setSelectedApplicationId(returnContext.applicationId);
+                      }
+                      setReturnContext(null);
+                    } else {
+                      setCurrentPage('overview');
+                    }
+                  }}
+                  daemonConnected={daemonConnected}
+                  isLocked={Boolean(editingCitizenLockedApp)}
+                  lockedReason={editingCitizenLockedApp ? `Attached to ${editingCitizenLockedApp.status.toUpperCase()} case (${editingCitizenLockedApp.id})` : undefined}
+                />
+              );
+            })()
           )}
 
           {currentPage === 'applications' && (
@@ -700,12 +954,24 @@ export const App: React.FC = () => {
                 service={activeService}
                 onBack={() => setSelectedApplicationId(null)}
                 onEditCitizen={id => {
+                  const lockedApp = applications.find(
+                    a => a.citizenId === id && (a.status === 'submitted' || a.status === 'closed')
+                  );
+                  if (lockedApp) {
+                    showToast(`Cannot edit applicant data: Record is locked under ${lockedApp.status} case ${lockedApp.id}.`, 'error');
+                    return;
+                  }
+                  setReturnContext({ page: 'applications', applicationId: activeApp?.id });
                   setEditingCitizenId(id);
                   setCurrentPage('intake');
                 }}
                 onUpdateStatus={handleUpdateStatus}
+                onUpdateFeeStatus={handleUpdateFeeStatus}
                 onSavePreflight={handleSavePreflight}
                 onShowToast={showToast}
+                onNavigateToSimulator={() => setCurrentPage('simulator')}
+                operatorName={profile.operatorName}
+                centreName={profile.centreName}
               />
             ) : (
               <Applications
@@ -713,7 +979,13 @@ export const App: React.FC = () => {
                 citizens={citizens}
                 services={services}
                 onOpenApplication={id => setSelectedApplicationId(id)}
-                onNewApplication={() => setShowNewAppModal(true)}
+                onLaunchPortal={handleLaunchApplicationInPortal}
+                onNewApplication={() => {
+                  setEditingCitizenId(null);
+                  setReturnContext(null);
+                  setCurrentPage('intake');
+                }}
+                onDeliverCertificate={handleDeliverCertificate}
               />
             )
           )}
@@ -765,63 +1037,90 @@ export const App: React.FC = () => {
               onExportCsv={handleExportAuditCsv}
             />
           )}
+
+          {currentPage === 'simulator' && (() => {
+            const nextReadyApp = applications.find(a => a.status === 'ready' && a.id !== selectedApplicationId);
+            const nextBurstAppInfo = nextReadyApp ? {
+              id: nextReadyApp.id,
+              citizenName: citizens.find(c => c.id === nextReadyApp.citizenId)?.fullName || 'Citizen',
+              serviceName: services.find(s => s.id === nextReadyApp.serviceId)?.name?.split('(')[0].trim() || 'Service'
+            } : null;
+
+            return (
+              <PortalSimulator
+                activeApplicationId={selectedApplicationId || undefined}
+                onBackToWorkspace={() => setCurrentPage('applications')}
+                onRecordSubmission={handleRecordSubmission}
+                onPrintReceipt={(ref) => {
+                  const targetApp = (selectedApplicationId ? applications.find(a => a.id === selectedApplicationId) : null)
+                    || applications.find(a => a.receiptRef === ref)
+                    || applications[0];
+                  if (targetApp) {
+                    setReceiptModalAppId(targetApp.id);
+                  }
+                }}
+                nextBurstApp={nextBurstAppInfo}
+                onAdvanceBurst={async () => {
+                  if (nextReadyApp) {
+                    await handleLaunchApplicationInPortal(nextReadyApp.id);
+                    showToast(`⚡ Loaded next ready application: ${nextBurstAppInfo?.citizenName} (${nextBurstAppInfo?.serviceName})`);
+                  }
+                }}
+              />
+            );
+          })()}
         </main>
+
+        {/* Global Modals */}
+        {handoffModalAppId && (() => {
+          const app = applications.find(a => a.id === handoffModalAppId);
+          if (!app) return null;
+          const citizen = citizens.find(c => c.id === app.citizenId);
+          const service = services.find(s => s.id === app.serviceId);
+          if (!citizen || !service) return null;
+
+          return (
+            <PortalHandoffModal
+              application={app}
+              citizen={citizen}
+              service={service}
+              onClose={() => setHandoffModalAppId(null)}
+              onLaunchSimulator={() => {
+                setHandoffModalAppId(null);
+                setSelectedApplicationId(app.id);
+                setCurrentPage('simulator');
+              }}
+              onOpenLivePortal={() => {
+                setHandoffModalAppId(null);
+                if (service.portalUrl && service.portalUrl.startsWith('http')) {
+                  window.open(service.portalUrl, '_blank', 'noopener,noreferrer');
+                }
+                showToast(`Opened ${service.name}. SevaDesk Companion will auto-fill on page load.`);
+              }}
+            />
+          );
+        })()}
+
+        {receiptModalAppId && (() => {
+          const app = applications.find(a => a.id === receiptModalAppId);
+          if (!app) return null;
+          const citizen = citizens.find(c => c.id === app.citizenId);
+          const service = services.find(s => s.id === app.serviceId);
+          if (!citizen || !service) return null;
+
+          return (
+            <CitizenReceiptModal
+              application={app}
+              citizen={citizen}
+              service={service}
+              operatorName={profile.operatorName}
+              centreName={profile.centreName}
+              onClose={() => setReceiptModalAppId(null)}
+              onUpdateFeeStatus={(status) => handleUpdateFeeStatus(app.id, status)}
+            />
+          );
+        })()}
       </div>
-
-      {/* New Application Modal */}
-      {showNewAppModal && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ padding: '24px' }}>
-            <h2 style={{ marginBottom: '6px' }}>Create new application case</h2>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '16px' }}>
-              Link a saved citizen record to a configured scheme.
-            </p>
-
-            <form onSubmit={handleCreateNewAppSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div className="form-group">
-                <label className="form-label" htmlFor="newAppCitizen">Citizen *</label>
-                <select
-                  id="newAppCitizen"
-                  className="form-control"
-                  value={newAppCitizenId}
-                  onChange={e => setNewAppCitizenId(e.target.value)}
-                  required
-                >
-                  <option value="">Select a citizen record…</option>
-                  {citizens.map(c => (
-                    <option key={c.id} value={c.id}>{c.fullName} · {c.id}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" htmlFor="newAppService">Service / Scheme *</label>
-                <select
-                  id="newAppService"
-                  className="form-control"
-                  value={newAppServiceId}
-                  onChange={e => setNewAppServiceId(e.target.value)}
-                  required
-                >
-                  <option value="">Select a service…</option>
-                  {services.map(s => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.department || 'Scheme'})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowNewAppModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  Create case →
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

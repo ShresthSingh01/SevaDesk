@@ -249,3 +249,77 @@ async def test_portal_health_probe():
     assert unreachable["congestion"] == "offline"
     assert "error" in unreachable
 
+def test_submitted_application_cannot_be_reversed():
+    # Create service, citizen and application
+    Repository.save_service({"id": "srv-test-income", "name": "Income Certificate"})
+    citizen = Repository.save_citizen({"fullName": "Test Locked Citizen", "dob": "1995-05-15"})
+    app = Repository.save_application({
+        "citizenId": citizen["id"],
+        "serviceId": "srv-test-income",
+        "status": "ready"
+    })
+
+    # Transition to submitted (allowed)
+    submitted_app = Repository.save_application({
+        "id": app["id"],
+        "citizenId": citizen["id"],
+        "serviceId": "srv-test-income",
+        "status": "submitted",
+        "receiptRef": "UP2026IN001122"
+    })
+    assert submitted_app["status"] == "submitted"
+
+    # Reversal to ready must fail
+    with pytest.raises(ValueError, match="Cannot reverse submitted application"):
+        Repository.save_application({
+            "id": app["id"],
+            "citizenId": citizen["id"],
+            "serviceId": "srv-test-income",
+            "status": "ready"
+        })
+
+    # Reversal to draft must fail
+    with pytest.raises(ValueError, match="Cannot reverse submitted application"):
+        Repository.save_application({
+            "id": app["id"],
+            "citizenId": citizen["id"],
+            "serviceId": "srv-test-income",
+            "status": "draft"
+        })
+
+    # Transition to closed is allowed
+    closed_app = Repository.save_application({
+        "id": app["id"],
+        "citizenId": citizen["id"],
+        "serviceId": "srv-test-income",
+        "status": "closed"
+    })
+    assert closed_app["status"] == "closed"
+
+    # Any change from closed must fail
+    with pytest.raises(ValueError, match="Closed applications are immutable"):
+        Repository.save_application({
+            "id": app["id"],
+            "citizenId": citizen["id"],
+            "serviceId": "srv-test-income",
+            "status": "ready"
+        })
+
+def test_locked_citizen_cannot_be_modified():
+    Repository.save_service({"id": "srv-test-income2", "name": "Income Certificate 2"})
+    citizen = Repository.save_citizen({"fullName": "Sealed Citizen", "dob": "1992-02-02"})
+    Repository.save_application({
+        "citizenId": citizen["id"],
+        "serviceId": "srv-test-income2",
+        "status": "submitted",
+        "receiptRef": "ACK-999"
+    })
+
+    # Modifying this citizen must be blocked
+    with pytest.raises(ValueError, match="Cannot modify citizen data: linked to locked case"):
+        Repository.save_citizen({
+            "id": citizen["id"],
+            "fullName": "Tampered Name"
+        })
+
+

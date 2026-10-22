@@ -350,6 +350,56 @@ function updateHeroPanel() {
     if (heroBtn) heroBtn.disabled = true;
     if (heroBtnTitle) heroBtnTitle.textContent = 'Waiting for Case';
   }
+
+  renderDocuments();
+}
+
+function renderDocuments() {
+  const section = $('#documentsSection');
+  const container = $('#documentsList');
+  const badge = $('#docsCountBadge');
+  if (!section || !container) return;
+
+  const docs = state.payload?.documents || [];
+  if (!docs.length) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  section.classList.remove('hidden');
+  if (badge) badge.textContent = `${docs.length} Staged`;
+
+  const html = docs.map(doc => {
+    const isPhoto = /photo/i.test(doc.name) || doc.category === 'photo' || doc.role === 'photo';
+    const limit = isPhoto ? '≤ 20KB OK' : '≤ 100KB OK';
+    const icon = isPhoto ? '👤' : '📄';
+    const downloadAction = doc.dataUrl ? `
+      <a href="${doc.dataUrl}" download="${esc(doc.name)}" style="color: var(--primary); text-decoration: underline; font-size: 9.5px; font-weight: 700; margin-left: 6px;" title="Save optimized document to downloads">
+        Save file ↗
+      </a>
+    ` : '';
+
+    return `
+      <div class="field-row is-checked" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+          <span style="font-size: 14px; flex-shrink: 0;">${icon}</span>
+          <div style="min-width: 0;">
+            <div style="font-weight: 600; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${esc(doc.name)}">
+              ${esc(doc.name)}
+            </div>
+            <div style="font-size: 9.5px; color: var(--ink-muted);">
+              ${doc.sizeKB || Math.round((doc.size || 0) / 1024)} KB · ${doc.isOptimized ? 'Canvas Quantized' : 'Standard Format'} ${downloadAction}
+            </div>
+          </div>
+        </div>
+        <span class="portal-chip" style="color: var(--primary); background: var(--primary-light); border-color: var(--primary-border); font-size: 9.5px; font-weight: 600; flex-shrink: 0;">
+          ✓ ${limit}
+        </span>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = html;
 }
 
 async function scanPortalAndBuildMappings() {
@@ -578,8 +628,12 @@ async function fillMappedFields() {
 
     // Save to quick restore session cache (30 min TTL)
     try {
-      if (chrome?.storage?.local && state.payload) {
-        chrome.storage.local.set({
+      // DPDP Act 2023 Compliance: Use chrome.storage.session (volatile RAM only).
+      // This data is wiped the instant the browser closes — zero disk footprint.
+      // chrome.storage.local writes unencrypted LevelDB files to AppData\Local\Google\Chrome,
+      // which can be recovered even after deletion. session storage eliminates this entirely.
+      if (chrome?.storage?.session && state.payload) {
+        chrome.storage.session.set({
           lastInjectedSession: {
             applicant: state.payload.citizen?.displayName || state.payload.citizen?.fullName || 'Applicant',
             service: state.payload.application?.serviceName || 'Service',
@@ -730,9 +784,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Check for cached previous session (Timeout Recovery)
+  // Uses chrome.storage.session — volatile RAM only, never touches disk.
   try {
-    if (chrome?.storage?.local) {
-      chrome.storage.local.get(['lastInjectedSession'], data => {
+    if (chrome?.storage?.session) {
+      chrome.storage.session.get(['lastInjectedSession'], data => {
         const last = data?.lastInjectedSession;
         if (last && last.payload && Date.now() - last.timestamp < 30 * 60 * 1000) {
           const reinjectBtn = $('#reinjectPayload');

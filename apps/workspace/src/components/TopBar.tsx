@@ -15,7 +15,8 @@ const PAGE_TITLES: Record<PageId, string> = {
   fees: 'Fee transparency',
   services: 'Services & rules',
   audit: 'Audit trail',
-  citizenDisplay: 'Citizen Display Mode'
+  citizenDisplay: 'Citizen Display Mode',
+  simulator: 'State Portal Simulator'
 };
 
 export const TopBar: React.FC<TopBarProps> = ({ currentPage, onNewApplication, daemonConnected }) => {
@@ -28,19 +29,22 @@ export const TopBar: React.FC<TopBarProps> = ({ currentPage, onNewApplication, d
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          fontSize: '0.75rem',
-          fontWeight: 600,
-          color: daemonConnected ? 'var(--status-good)' : 'var(--text-muted)',
-          backgroundColor: daemonConnected ? 'var(--status-good-bg)' : 'var(--bg-subtle)',
-          padding: '4px 10px',
-          borderRadius: 'var(--radius-full)'
-        }}>
-          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: daemonConnected ? 'var(--status-good)' : 'var(--text-subtle)' }} />
-          <span>{daemonConnected ? 'Local Core connected' : 'Browser vault unlocked'}</span>
+        <div 
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            color: daemonConnected ? 'var(--status-good)' : '#b45309',
+            backgroundColor: daemonConnected ? 'var(--status-good-bg)' : '#fef3c7',
+            padding: '4px 10px',
+            borderRadius: 'var(--radius-full)'
+          }}
+          title={daemonConnected ? 'Local Python Core daemon active (port 8765) — direct IPC enabled' : 'Python daemon offline — browser vault active (run run.bat for daemon)'}
+        >
+          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: daemonConnected ? 'var(--status-good)' : '#d97706' }} />
+          <span>{daemonConnected ? 'Local Core connected' : 'Local Core offline (Browser Vault)'}</span>
         </div>
 
         <button className="btn btn-primary btn-sm" onClick={onNewApplication}>

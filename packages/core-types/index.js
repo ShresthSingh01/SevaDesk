@@ -186,18 +186,36 @@ export function validateCase(citizen = {}, service = {}, documents = []) {
 
   for (const doc of documents || []) {
     const ext = String(doc.name || '').split('.').pop().toLowerCase();
-    if (allowed.length && !allowed.includes(ext)) {
+    let slotAllowed = allowed;
+    let slotMaxBytes = maxBytes;
+    let slotLabel = doc.name || 'Document';
+
+    if (service.documentSlots && (doc.slotId || doc.role)) {
+      const slot = service.documentSlots.find(s => s.id === doc.slotId || s.id === doc.role);
+      if (slot) {
+        slotLabel = slot.label || slotLabel;
+        if (slot.allowedExtensions && slot.allowedExtensions.length > 0) {
+          slotAllowed = slot.allowedExtensions.map(e => e.toLowerCase().replace(/^\./, ''));
+        }
+        if (slot.maxKB) {
+          slotMaxBytes = slot.maxKB * 1024;
+        }
+      }
+    }
+
+    if (slotAllowed.length && !slotAllowed.includes(ext)) {
       errors.push({
         field: 'documents',
-        label: doc.name || 'Document',
-        message: `${doc.name || 'File'} type .${ext} is not in this service's configured allowed list (${allowed.join(', ')}).`
+        label: slotLabel,
+        message: `${doc.name || 'File'} type .${ext} is not in allowed list (${slotAllowed.join(', ')}).`
       });
     }
-    if (hasMaxUpload && Number(doc.size || 0) > maxBytes) {
+    if (slotMaxBytes && Number(doc.size || 0) > slotMaxBytes) {
+      const maxKBDisplay = Math.round(slotMaxBytes / 1024);
       errors.push({
         field: 'documents',
-        label: doc.name || 'Document',
-        message: `${doc.name || 'File'} exceeds the configured ${Number(maxValue)} MB per-file limit.`
+        label: slotLabel,
+        message: `${doc.name || 'File'} (${Math.round((doc.size || 0) / 1024)} KB) exceeds the configured ${maxKBDisplay} KB limit.`
       });
     }
   }
@@ -698,16 +716,65 @@ export function buildApplicationPayload(application, citizen, service) {
       id: application.id,
       serviceName: service?.name || 'Unconfigured service',
       portalUrl: service?.portalUrl || '',
-      adapterId: service?.adapterId || 'generic-fallback'
+      adapterId: service?.adapterId || 'generic-fallback',
+      feeStatus: application?.feeStatus || 'pending'
     },
     citizen: {
       id: citizen?.id,
       displayName: citizen?.fullName || '',
       fields
     },
+    documents: Array.isArray(application?.documents) ? application.documents : [],
     generatedAt: new Date().toISOString(),
     notice: 'Review every mapping. This payload does not submit an application. OTP, CAPTCHA, passwords, and final submission remain manual.'
   };
 }
+
+export const STATUS_TRANSITIONS = {
+  draft: ['draft', 'needs_correction', 'ready', 'closed'],
+  needs_correction: ['needs_correction', 'draft', 'ready', 'closed'],
+  ready: ['ready', 'needs_correction', 'in_portal', 'draft', 'closed'],
+  in_portal: ['in_portal', 'ready', 'needs_correction', 'submitted', 'closed'],
+  submitted: ['submitted', 'rejected', 'closed'],
+  rejected: ['rejected', 'needs_correction', 'ready', 'closed'],
+  closed: ['closed']
+};
+
+export function validateStatusTransition(currentStatus, targetStatus) {
+  if (!currentStatus || !targetStatus) {
+    return { allowed: false, reason: 'Status is required.' };
+  }
+  if (currentStatus === targetStatus) {
+    return { allowed: true };
+  }
+  if (currentStatus === 'closed') {
+    return { allowed: false, reason: 'Closed applications are terminal and cannot be modified.' };
+  }
+  if (currentStatus === 'submitted') {
+    if (['draft', 'needs_correction', 'ready', 'in_portal'].includes(targetStatus)) {
+      return { 
+        allowed: false, 
+        reason: `Cannot reverse submitted application back to ${targetStatus.replace('_', ' ')}. Only rejection or closure is permitted.` 
+      };
+    }
+  }
+  const allowed = STATUS_TRANSITIONS[currentStatus] || [];
+  if (!allowed.includes(targetStatus)) {
+    return { allowed: false, reason: `Disallowed transition from ${currentStatus} to ${targetStatus}.` };
+  }
+  return { allowed: true };
+}
+
+export function isCitizenLocked(citizenId, applications = []) {
+  if (!citizenId || !Array.isArray(applications)) return false;
+  return applications.some(a => a.citizenId === citizenId && (a.status === 'submitted' || a.status === 'closed'));
+}
+
+export const PROFORMA_TYPES = [
+  'self_declaration',
+  'income_affidavit',
+  'caste_declaration',
+  'general_proforma'
+];
 
 export { deriveVaultKey, encryptVault, decryptVault, base64ToBytes } from './vault.js';

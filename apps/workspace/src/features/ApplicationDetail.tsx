@@ -13,7 +13,14 @@ import {
   Send,
   Zap,
   Activity,
-  RefreshCw
+  RefreshCw,
+  Lock,
+  ShieldAlert,
+  Download,
+  Printer,
+  Globe,
+  IndianRupee,
+  Check
 } from 'lucide-react';
 import { 
   Application, 
@@ -23,33 +30,49 @@ import {
   maskIdentifier, 
   validateCase, 
   interpretPortalError,
-  buildApplicationPayload
+  buildApplicationPayload,
+  validateStatusTransition,
+  formatINR,
+  DocumentSlotDefinition
 } from '@sevadesk/core-types';
 import { requestPortalErrorInterpretation, pushBridgeSession, checkPortalHealth, PortalHealthStatus } from '../lib/api';
 import { optimizeImageForPortal, formatBytes } from '../lib/imageCompressor';
+import { CitizenReceiptModal } from '../components/CitizenReceiptModal';
+import { PortalHandoffModal } from '../components/PortalHandoffModal';
+import { PrintableProformaModal } from '../components/PrintableProformaModal';
 
 interface ApplicationDetailProps {
   application: Application;
   citizen: Citizen | undefined;
   service: ServiceDefinition | undefined;
+  operatorName?: string;
+  centreName?: string;
   onBack: () => void;
   onEditCitizen: (citizenId: string) => void;
   onUpdateStatus: (appId: string, status: string, ref?: string, note?: string) => Promise<void>;
+  onUpdateFeeStatus?: (appId: string, status: 'pending' | 'collected') => void;
   onSavePreflight: (appId: string, snapshot: any) => Promise<void>;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
+  onNavigateToSimulator?: () => void;
 }
 
 export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
   application,
   citizen,
   service,
+  operatorName = 'Operator',
+  centreName = 'Service centre',
   onBack,
   onEditCitizen,
   onUpdateStatus,
+  onUpdateFeeStatus,
   onSavePreflight,
-  onShowToast
+  onShowToast,
+  onNavigateToSimulator
 }) => {
-  const [testFiles, setTestFiles] = useState<Array<{ name: string; size: number; type: string }>>([]);
+  const [testFiles, setTestFiles] = useState<Array<{ name: string; size: number; type: string }>>(
+    (application.documents || []).map(d => ({ name: d.name, size: d.size, type: d.type }))
+  );
   const [portalErrorMessage, setPortalErrorMessage] = useState('');
   const [errorInterpretation, setErrorInterpretation] = useState<any>(null);
   
@@ -66,6 +89,126 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
   const [checkingHealth, setCheckingHealth] = useState(false);
   const [optimizingDoc, setOptimizingDoc] = useState(false);
   const [optimizationNote, setOptimizationNote] = useState<string | null>(null);
+
+  // Flaw 7: Auto-capture ACK reference from Portal Simulator
+  const [detectedAck, setDetectedAck] = useState<{ ref: string; date: string } | null>(null);
+
+  // Receipt & Portal Handoff Modal State
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [showHandoffModal, setShowHandoffModal] = useState(false);
+  const [showDeliverCertificateModal, setShowDeliverCertificateModal] = useState(false);
+  const [certificateNumber, setCertificateNumber] = useState(application.certificateRef || '');
+  const [deliveryNote, setDeliveryNote] = useState('');
+  const [activeProformaSlot, setActiveProformaSlot] = useState<DocumentSlotDefinition | null>(null);
+
+  const handleAttachProformaScan = async (file: File) => {
+    setRawFiles(prev => [...prev, file]);
+    const newDoc = { name: file.name, size: file.size, type: file.type };
+    setTestFiles(prev => [...prev, newDoc]);
+    
+    // Auto-update application documents
+    const docDataUrl = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(file);
+    });
+
+    const targetSlot = activeProformaSlot || service?.documentSlots?.find(s => s.proformaType);
+    const updatedDocs = [
+      ...(application.documents || []),
+      {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        role: targetSlot?.id || 'declaration',
+        slotId: targetSlot?.id || 'declaration',
+        dataUrl: docDataUrl,
+        optimised: true
+      }
+    ];
+
+    application.documents = updatedDocs;
+    await handleRunPreflight();
+    onShowToast(`Attached signed ${file.name} to case.`);
+  };
+
+  const handleOpenLivePortal = () => {
+    if (!service?.portalUrl) return;
+    window.open(service.portalUrl, '_blank');
+    setShowHandoffModal(false);
+    onShowToast(`Opened ${new URL(service.portalUrl).hostname}. SevaDesk Companion will auto-fill on page load.`);
+  };
+
+  const handleLaunchSimulatorFromModal = async () => {
+    setShowHandoffModal(false);
+    if (onNavigateToSimulator) {
+      onNavigateToSimulator();
+    } else {
+      window.open(`/?view=simulator&portal=${service?.portalUrl?.includes('mahadbt') ? 'mahadbt' : 'edistrict.up.gov.in'}`, '_blank');
+    }
+  };
+
+  const handleTrackOnPortal = async () => {
+    if (!service?.portalUrl) return;
+    if (application.receiptRef) {
+      try {
+        await navigator.clipboard.writeText(application.receiptRef);
+        onShowToast(`Copied Ref "${application.receiptRef}" to clipboard! Opening ${new URL(service.portalUrl).hostname}...`);
+      } catch {}
+    }
+    window.open(service.portalUrl, '_blank');
+  };
+
+  const handleDeliverCertificate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const note = deliveryNote.trim() || `Certificate ${certificateNumber.trim() || 'Issued'} handed over to citizen.`;
+    await onUpdateStatus(application.id, 'closed', application.receiptRef, note);
+    setShowDeliverCertificateModal(false);
+    onShowToast('✓ Certificate delivered and case completed & sealed!');
+  };
+
+  useEffect(() => {
+    if (application.documents && application.documents.length > 0 && testFiles.length === 0) {
+      setTestFiles(application.documents.map(d => ({ name: d.name, size: d.size, type: d.type })));
+    }
+  }, [application.documents]);
+
+  useEffect(() => {
+    const handleAckMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === 'SEVA_ACK_DETECTED' && e.data.ref) {
+        setDetectedAck({ ref: e.data.ref, date: e.data.date || new Date().toLocaleString() });
+        onShowToast(`Official portal submission detected: Ref ${e.data.ref}!`, 'success');
+      }
+    };
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'seva_last_portal_ack' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed.ref && (!detectedAck || detectedAck.ref !== parsed.ref)) {
+            setDetectedAck({ ref: parsed.ref, date: parsed.date || new Date().toLocaleString() });
+            onShowToast(`Official portal submission detected: Ref ${parsed.ref}!`, 'success');
+          }
+        } catch {}
+      }
+    };
+
+    window.addEventListener('message', handleAckMessage);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('message', handleAckMessage);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [detectedAck]);
+
+  const handleConfirmDetectedAck = async () => {
+    if (!detectedAck) return;
+    await onUpdateStatus(application.id, 'submitted', detectedAck.ref, 'Auto-captured from official state portal simulator.');
+    setReceiptRef(detectedAck.ref);
+    setStatusVal('submitted');
+    setDetectedAck(null);
+    onShowToast(`✓ Case ${application.id} closed and marked Submitted with Ref ${detectedAck.ref}!`);
+  };
 
   const handleCheckPortalHealth = async () => {
     if (!service?.portalUrl) return;
@@ -113,28 +256,115 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
     };
     await onSavePreflight(application.id, snapshot);
     onShowToast(res.valid ? 'Preflight checks passed!' : `${res.errors.length} issue(s) need correction.`, res.valid ? 'success' : 'error');
+    return snapshot;
   };
 
   const handleDispatchToCompanion = async () => {
     if (!citizen || !service) return;
-    if (!application.preflight?.valid) {
-      onShowToast('Run and pass preflight validation before sending to companion.', 'error');
+
+    // Dynamically run preflight if not yet run
+    let preflight = application.preflight;
+    if (!preflight) {
+      preflight = await handleRunPreflight();
+    }
+
+    if (!preflight?.valid) {
+      const missingFields = (preflight?.errors || []).filter(e => e.field !== 'documents');
+      const docErrors = (preflight?.errors || []).filter(e => e.field === 'documents');
+      if (missingFields.length > 0) {
+        onShowToast(`Applicant is missing required fields (${missingFields.map(e => e.label).join(', ')}). Edit applicant first.`, 'error');
+        return;
+      }
+      if (docErrors.length > 0) {
+        onShowToast(`Document size exceeds limit: Click 'Optimize Documents' before sending.`, 'error');
+        return;
+      }
+      onShowToast('Preflight check failed. Please resolve errors before sending.', 'error');
       return;
     }
+
+    const fileToDataUrl = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    };
+
+    const targetLimitMB = service.maxUploadMB || 0.20;
+    const stagedDocs = await Promise.all((rawFiles.length > 0 ? rawFiles : []).map(async f => {
+      const lower = f.name.toLowerCase();
+      const role = lower.includes('photo') ? 'photo' :
+                   lower.includes('declaration') ? 'selfDeclaration' :
+                   lower.includes('income') ? 'incomeProof' : 'document';
+      let dataUrl = '';
+      try {
+        dataUrl = await fileToDataUrl(f);
+      } catch {}
+
+      return {
+        role,
+        name: f.name,
+        size: f.size,
+        type: f.type,
+        sizeKB: Math.round(f.size / 1024),
+        isOptimized: (f.size / (1024 * 1024)) <= targetLimitMB,
+        objectUrl: URL.createObjectURL(f),
+        dataUrl
+      };
+    }));
+
+    const finalDocsPayload = stagedDocs.length > 0 ? stagedDocs : testFiles.map(f => {
+      const lower = f.name.toLowerCase();
+      const role = lower.includes('photo') ? 'photo' :
+                   lower.includes('declaration') ? 'selfDeclaration' :
+                   lower.includes('income') ? 'incomeProof' : 'document';
+      return {
+        role,
+        name: f.name,
+        size: f.size,
+        type: f.type,
+        sizeKB: Math.round(f.size / 1024),
+        isOptimized: (f.size / (1024 * 1024)) <= targetLimitMB
+      };
+    });
+
     const payload = buildApplicationPayload(application, citizen, service);
+    (payload as any).documents = finalDocsPayload;
+
+    // Provide immediate in-memory and storage bridge for simulator
+    (window as any).__SEVA_COMPANION_PAYLOAD__ = payload;
+    try {
+      localStorage.setItem('seva_active_bridge_payload', JSON.stringify(payload));
+    } catch {}
+
     try {
       // 1. Direct Loopback IPC Bridge (Zero OS Clipboard PII Exposure)
       await pushBridgeSession(payload);
       // 2. Also populate clipboard as secondary offline fallback
       try { await navigator.clipboard.writeText(JSON.stringify(payload, null, 2)); } catch {}
-      onShowToast('Dispatched to SevaDesk Companion! Open extension puzzle icon on portal.');
+      onShowToast('✓ Dispatched to SevaDesk Bridge! Now click Auto-Fill in Portal Simulator.');
     } catch {
       try {
         await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-        onShowToast('Dispatched to clipboard (Local daemon offline). Paste into companion.');
+        onShowToast('Dispatched to clipboard & local session. Paste or auto-fill in simulator.');
       } catch {
-        onShowToast('Could not access clipboard or IPC bridge.', 'error');
+        onShowToast('Dispatched to local session. Proceed to Portal Simulator.');
       }
+    }
+  };
+
+  const handleLaunchSimulator = async () => {
+    if (!citizen || !service) return;
+
+    await handleDispatchToCompanion();
+
+    if ((window as any).__SEVA_COMPANION_PAYLOAD__) {
+      if (application.status === 'ready' || application.status === 'draft') {
+        await onUpdateStatus(application.id, 'in_portal');
+      }
+      setShowHandoffModal(true);
     }
   };
 
@@ -150,8 +380,10 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Flaw 4: Auto-optimise immediately on file select
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = Array.from(e.target.files || []);
+    if (raw.length === 0) return;
     setRawFiles(raw);
     const files = raw.map(f => ({
       name: f.name,
@@ -160,6 +392,43 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
     }));
     setTestFiles(files);
     setOptimizationNote(null);
+
+    const targetMB = service?.maxUploadMB || 0.20;
+    const hasOversized = raw.some(rf => rf.type.startsWith('image/') && (rf.size > targetMB * 1024 * 1024));
+
+    if (hasOversized) {
+      setOptimizingDoc(true);
+      try {
+        const updatedRaw: File[] = [];
+        let notes: string[] = [];
+
+        for (const rf of raw) {
+          if (rf.type.startsWith('image/') && (rf.size > targetMB * 1024 * 1024)) {
+            const res = await optimizeImageForPortal(rf, targetMB);
+            updatedRaw.push(res.optimizedFile);
+            notes.push(`${rf.name}: ${formatBytes(res.originalSizeBytes)} ➔ ${formatBytes(res.optimizedSizeBytes)} (${res.reductionPercentage}% saved)`);
+          } else {
+            updatedRaw.push(rf);
+          }
+        }
+
+        setRawFiles(updatedRaw);
+        setTestFiles(updatedRaw.map(f => ({
+          name: f.name,
+          size: f.size,
+          type: f.type
+        })));
+
+        if (notes.length > 0) {
+          setOptimizationNote(`✓ Auto-optimized: ${notes.join(' · ')}`);
+          onShowToast(`Auto-optimized ${notes.length} document(s) on-device to satisfy portal limits!`, 'success');
+        }
+      } catch (err: any) {
+        onShowToast(err.message || 'Auto-optimization failed.', 'error');
+      } finally {
+        setOptimizingDoc(false);
+      }
+    }
   };
 
   const handleOptimizeOversizedDocs = async () => {
@@ -201,8 +470,30 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
     }
   };
 
+  const handleDownloadOptimizedDocs = () => {
+    if (rawFiles.length === 0) return;
+    for (const f of rawFiles) {
+      const url = URL.createObjectURL(f);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `PORTAL_${f.name}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+    onShowToast(`Downloaded ${rawFiles.length} optimized document(s) to your Downloads folder!`, 'success');
+  };
+
+  const isSubmitted = application.status === 'submitted';
+  const isClosed = application.status === 'closed';
+  const isApplicationLocked = isSubmitted || isClosed;
+
   const handleStatusSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const check = validateStatusTransition(application.status, statusVal);
+    if (!check.allowed) {
+      onShowToast(check.reason || 'Status transition not allowed.', 'error');
+      return;
+    }
     if (statusVal === 'submitted') {
       if (!receiptRef.trim()) {
         onShowToast('Enter official portal acknowledgement/reference number.', 'error');
@@ -221,7 +512,7 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
   return (
     <div>
       {/* Top Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <button className="btn btn-secondary btn-sm" onClick={onBack}>
             <ArrowLeft size={16} /> Back
@@ -232,26 +523,205 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
               APPLICATION REVIEW
             </div>
             <h1>{service?.name || 'Application Details'}</h1>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Case ID: {application.id} · Created {new Date(application.createdAt).toLocaleDateString()}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                Case ID: {application.id} · Created {new Date(application.createdAt).toLocaleDateString()}
+              </span>
+              <span style={{ color: 'var(--border-strong)' }}>·</span>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                Fee: <strong>{formatINR((service?.officialFee || 0) + (service?.operatorCharge || 0))}</strong> (Govt ₹{service?.officialFee ?? 0} + CSC ₹{service?.operatorCharge ?? 0})
+              </span>
+              {application.feeStatus === 'collected' ? (
+                <span className="status-pill good" style={{ fontSize: '0.72rem', padding: '2px 8px' }}>
+                  <CheckCircle2 size={12} /> Cash Collected
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-xs"
+                  onClick={() => onUpdateFeeStatus && onUpdateFeeStatus(application.id, 'collected')}
+                  style={{ fontSize: '0.72rem', padding: '2px 8px', color: 'var(--status-warn)', borderColor: 'var(--status-warn)' }}
+                  title="Mark cash payment collected from citizen"
+                >
+                  Collect ₹{(service?.officialFee || 0) + (service?.operatorCharge || 0)} Cash
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button
-            className="btn btn-secondary"
-            onClick={handleDispatchToCompanion}
-            disabled={!application.preflight?.valid}
-            title={!application.preflight?.valid ? 'Pass preflight first' : 'Dispatch payload to companion extension'}
-          >
-            <Send size={16} /> Send to Companion
-          </button>
-          <button className="btn btn-primary" onClick={() => setShowStatusModal(true)}>
-            Update status
-          </button>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {!isSubmitted && !isClosed && (
+            <button
+              className="btn btn-primary"
+              onClick={handleLaunchSimulator}
+              disabled={isApplicationLocked}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontWeight: 700 }}
+              title="Launch application into official portal companion or offline simulator"
+            >
+              <Zap size={16} />
+              <span>⚡ Launch Portal Handoff (Pre-Filled)</span>
+            </button>
+          )}
+
+          {/* 1-Click Print Citizen Slip */}
+          {(isSubmitted || isClosed) && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setShowReceiptModal(true)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 700 }}
+              title="Print official citizen acknowledgement & cash fee receipt slip"
+            >
+              <Printer size={15} />
+              <span>🖨️ Print Citizen Slip</span>
+            </button>
+          )}
+
+          {/* Official Portal Tracking */}
+          {isSubmitted && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleTrackOnPortal}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              title="Copy acknowledgement ref and open official portal to check current status"
+            >
+              <Globe size={15} />
+              <span>Track on Portal ↗</span>
+            </button>
+          )}
+
+          {/* Deliver Certificate & Complete Case */}
+          {isSubmitted && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowDeliverCertificateModal(true)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 700, borderColor: 'var(--status-good)', color: 'var(--status-good)' }}
+              title="Record signed certificate delivery and mark case closed"
+            >
+              <CheckCircle2 size={15} />
+              <span>Deliver Certificate & Close</span>
+            </button>
+          )}
+
+          {isClosed ? (
+            <button
+              className="btn btn-secondary"
+              disabled
+              title="Closed applications are terminal and cannot be modified."
+              style={{ opacity: 0.8, cursor: 'not-allowed', display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              <Lock size={14} /> Case Closed (Sealed)
+            </button>
+          ) : (
+            <button className="btn btn-secondary" onClick={() => setShowStatusModal(true)}>
+              Update status
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Flaw 7: Auto-Captured ACK Banner from Simulator */}
+      {detectedAck && !isSubmitted && !isClosed && (
+        <div style={{
+          padding: '16px 20px',
+          borderRadius: 'var(--radius-md)',
+          backgroundColor: '#ecfdf5',
+          border: '2px solid #10b981',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '16px',
+          boxShadow: 'var(--shadow-sm)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <Zap size={22} color="#059669" style={{ flexShrink: 0 }} />
+            <div>
+              <strong style={{ fontSize: '0.92rem', color: '#065f46' }}>
+                Official Portal Acknowledgement Captured!
+              </strong>
+              <div style={{ fontSize: '0.82rem', color: '#047857', marginTop: '2px' }}>
+                Simulator generated Acknowledgement No: <strong style={{ letterSpacing: '0.04em' }}>{detectedAck.ref}</strong> ({detectedAck.date})
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setDetectedAck(null)}
+            >
+              Dismiss
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleConfirmDetectedAck}
+              style={{ fontWeight: 700 }}
+            >
+              ✓ Confirm & Close Case ({detectedAck.ref})
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Immutability Banner when Submitted or Closed */}
+      {isSubmitted && (
+        <div style={{
+          padding: '12px 18px',
+          borderRadius: 'var(--radius-md)',
+          backgroundColor: 'var(--status-good-bg)',
+          border: '1px solid var(--primary-border)',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <CheckCircle2 size={18} color="var(--status-good)" style={{ flexShrink: 0 }} />
+            <div>
+              <strong style={{ fontSize: '0.86rem', color: 'var(--text-main)' }}>
+                Official Portal Submission Verified · Application Conditions Locked
+              </strong>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '2px 0 0' }}>
+                Portal Acknowledgement: <strong style={{ color: 'var(--primary)' }}>{application.receiptRef || 'Recorded'}</strong> · Reversals to draft or ready are prohibited. Applicant demographic particulars are sealed under legal audit rules.
+              </p>
+            </div>
+          </div>
+          <span className="status-pill good" style={{ fontWeight: 700 }}>● IMMUTABLE</span>
+        </div>
+      )}
+
+      {isClosed && (
+        <div style={{
+          padding: '12px 18px',
+          borderRadius: 'var(--radius-md)',
+          backgroundColor: 'var(--bg-subtle)',
+          border: '1px solid var(--border-light)',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <Lock size={18} color="var(--text-main)" style={{ flexShrink: 0 }} />
+            <div>
+              <strong style={{ fontSize: '0.86rem', color: 'var(--text-main)' }}>
+                Case Closed & Finalized · Sealed Record
+              </strong>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '2px 0 0' }}>
+                This case is terminal. All applicant details, preflight logs, and receipt references are permanently sealed in the cryptographic audit ledger.
+              </p>
+            </div>
+          </div>
+          <span className="status-pill" style={{ fontWeight: 700 }}>● ARCHIVED</span>
+        </div>
+      )}
 
       {/* Main Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px', alignItems: 'start' }}>
@@ -285,9 +755,18 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
                 </div>
 
                 <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border-light)' }}>
-                  <button className="btn btn-secondary btn-xs" onClick={() => onEditCitizen(citizen.id)}>
-                    Edit citizen record
-                  </button>
+                  {isApplicationLocked ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      <Lock size={14} color="var(--primary)" />
+                      <span>
+                        Applicant data locked ({isClosed ? 'Case Closed' : 'Submitted on Official Portal'}). Demographic particulars are sealed under legal audit rules.
+                      </span>
+                    </div>
+                  ) : (
+                    <button className="btn btn-secondary btn-xs" onClick={() => onEditCitizen(citizen.id)}>
+                      Edit citizen record
+                    </button>
+                  )}
                 </div>
               </>
             ) : (
@@ -342,9 +821,19 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
               })}
             </div>
 
-            <button className="btn btn-primary btn-sm" onClick={handleRunPreflight} style={{ width: '100%' }}>
-              Run preflight validation check
-            </button>
+            {isApplicationLocked ? (
+              <button
+                className="btn btn-secondary btn-sm"
+                disabled
+                style={{ width: '100%', opacity: 0.7, cursor: 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              >
+                <Lock size={14} /> Preflight verification sealed (Case {application.status})
+              </button>
+            ) : (
+              <button className="btn btn-primary btn-sm" onClick={handleRunPreflight} style={{ width: '100%' }}>
+                Run preflight validation check
+              </button>
+            )}
 
             {/* Preflight Results */}
             {application.preflight && (
@@ -475,16 +964,49 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
               <FileCheck size={18} color="var(--primary)" />
             </div>
 
+            {service?.documentSlots?.some(s => s.proformaType) && !isApplicationLocked && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => {
+                  const targetSlot = service.documentSlots?.find(s => s.proformaType) || service.documentSlots![0];
+                  setActiveProformaSlot(targetSlot);
+                }}
+                style={{
+                  width: '100%',
+                  marginBottom: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  fontSize: '0.8rem',
+                  fontWeight: 700
+                }}
+                title="Print pre-filled declaration proforma for applicant physical signature"
+              >
+                <Printer size={14} />
+                <span>🖨️ Print Pre-Filled Proforma ({service.documentSlots.find(s => s.proformaType)?.proformaTitle?.split('(')[0].trim() || 'घोषणा पत्र'})</span>
+              </button>
+            )}
+
             <div style={{ marginBottom: '12px' }}>
               <input
                 type="file"
                 multiple
                 accept=".pdf,.jpg,.jpeg,.png"
                 onChange={handleFileChange}
+                disabled={isApplicationLocked}
                 className="form-control"
-                style={{ fontSize: '0.8rem' }}
+                style={{ fontSize: '0.8rem', opacity: isApplicationLocked ? 0.6 : 1 }}
               />
             </div>
+
+            {isApplicationLocked && (
+              <div style={{ padding: '8px 10px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--bg-subtle)', color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Lock size={13} color="var(--primary)" />
+                <span>Document attachments locked: application is {application.status}.</span>
+              </div>
+            )}
 
             {testFiles.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
@@ -555,6 +1077,27 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
               </div>
             )}
 
+            {testFiles.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleDownloadOptimizedDocs}
+                style={{
+                  width: '100%',
+                  marginBottom: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  fontSize: '0.78rem'
+                }}
+                title="Download staged pre-compressed files to attach on government portal"
+              >
+                <Download size={14} color="var(--primary)" />
+                <span>📦 Download Staged Portal Documents Pack ({testFiles.length})</span>
+              </button>
+            )}
+
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               Configured limits: {service?.maxUploadMB ? `${service.maxUploadMB} MB max` : 'Size unconfigured'} · {service?.allowedExtensions?.join(', ') || 'Extensions unconfigured'}
             </div>
@@ -620,13 +1163,23 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
                   value={statusVal}
                   onChange={e => setStatusVal(e.target.value as any)}
                 >
-                  <option value="draft">Draft</option>
-                  <option value="needs_correction">Needs correction</option>
-                  <option value="ready">Ready for review</option>
-                  <option value="in_portal">In portal</option>
-                  <option value="submitted">Submitted on official portal</option>
-                  <option value="rejected">Rejected / returned by portal</option>
-                  <option value="closed">Closed</option>
+                  {application.status === 'submitted' ? (
+                    <>
+                      <option value="submitted">Submitted on official portal (Current)</option>
+                      <option value="rejected">Rejected / returned by portal</option>
+                      <option value="closed">Closed (Certificate delivered / Archive)</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="draft">Draft</option>
+                      <option value="needs_correction">Needs correction</option>
+                      <option value="ready">Ready for review</option>
+                      <option value="in_portal">In portal</option>
+                      <option value="submitted">Submitted on official portal</option>
+                      <option value="rejected">Rejected / returned by portal</option>
+                      <option value="closed">Closed</option>
+                    </>
+                  )}
                 </select>
               </div>
 
@@ -676,6 +1229,92 @@ export const ApplicationDetail: React.FC<ApplicationDetailProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Printable Citizen Receipt Slip Modal */}
+      {showReceiptModal && (
+        <CitizenReceiptModal
+          application={application}
+          citizen={citizen}
+          service={service}
+          operatorName={operatorName}
+          centreName={centreName}
+          onClose={() => setShowReceiptModal(false)}
+          onMarkFeeCollected={appId => onUpdateFeeStatus && onUpdateFeeStatus(appId, 'collected')}
+        />
+      )}
+
+      {/* Unified Portal Handoff Modal */}
+      {showHandoffModal && (
+        <PortalHandoffModal
+          application={application}
+          citizen={citizen}
+          service={service}
+          onLaunchSimulator={handleLaunchSimulatorFromModal}
+          onOpenLivePortal={handleOpenLivePortal}
+          onClose={() => setShowHandoffModal(false)}
+        />
+      )}
+
+      {/* Deliver Certificate & Complete Case Modal */}
+      {showDeliverCertificateModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '480px', padding: '24px' }}>
+            <h2 style={{ marginBottom: '6px' }}>Deliver Certificate & Complete Case</h2>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '16px' }}>
+              Record the signed certificate handover to <strong>{citizen?.fullName || 'the citizen'}</strong>. This completes the service and permanently seals the case under DPDP audit rules.
+            </p>
+
+            <form onSubmit={handleDeliverCertificate} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div className="form-group">
+                <label className="form-label" htmlFor="certRef">Certificate / Sanction Number</label>
+                <input
+                  id="certRef"
+                  className="form-control"
+                  placeholder="e.g. UP-INC-2026-891234 or Sanction ID"
+                  value={certificateNumber}
+                  onChange={e => setCertificateNumber(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="delNote">Handover / Verification Note</label>
+                <textarea
+                  id="delNote"
+                  className="form-control"
+                  rows={2}
+                  placeholder="e.g. Laminated physical certificate handed over to applicant in person."
+                  value={deliveryNote}
+                  onChange={e => setDeliveryNote(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowDeliverCertificateModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary btn-sm" style={{ fontWeight: 700 }}>
+                  ✓ Confirm Delivery & Seal Case
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Printable Pre-Filled Proforma Modal */}
+      {activeProformaSlot && service && (
+        <PrintableProformaModal
+          citizen={citizen}
+          service={service}
+          slot={activeProformaSlot}
+          operatorName={operatorName}
+          centreName={centreName}
+          onClose={() => setActiveProformaSlot(null)}
+          onAttachScan={handleAttachProformaScan}
+          onShowToast={(msg, type) => onShowToast(msg, type === 'error' ? 'error' : 'success')}
+        />
       )}
     </div>
   );

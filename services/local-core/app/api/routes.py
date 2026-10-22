@@ -132,7 +132,10 @@ def get_citizen(citizen_id: str):
 
 @router.post("/citizens")
 def save_citizen(data: Dict[str, Any]):
-    c = Repository.save_citizen(data)
+    try:
+        c = Repository.save_citizen(data)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     action = "citizen_updated" if data.get('id') else "citizen_created"
     Repository.add_audit(action, f"Saved citizen details with explicit consent. PII stored via AES-256-GCM.", "citizen", c["id"])
     return c
@@ -161,7 +164,10 @@ def list_applications():
 
 @router.post("/applications")
 def save_application(data: Dict[str, Any]):
-    app = Repository.save_application(data)
+    try:
+        app = Repository.save_application(data)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     Repository.add_audit("application_saved", f"Saved case status as {data.get('status')}.", "application", app.get('id', 'new'))
     return app
 
@@ -205,15 +211,31 @@ def bridge_clear_session():
     return {"status": "cleared"}
 
 # --- Real-Time Portal Latency & Health Probe ---
+# In-process cache: keyed by URL, value is (result_dict, timestamp).
+# Prevents WAF/IP bans when 10,000+ kiosks poll government portals continuously.
+# At 1 request per kiosk per 5 minutes, a 10k-kiosk deployment sends
+# ~33 req/sec total instead of ~10,000 req/sec — below any NIC rate limit.
+_portal_health_cache: dict = {}
+_PORTAL_HEALTH_TTL_SECONDS = 300  # 5 minutes
+
 @router.get("/portal/health")
 async def check_portal_health(url: str):
     """
     Measures real network latency and server responsiveness for government portals.
     Empowers operators to detect 504 timeouts, server crashes, and slow peak hours before opening portal tabs.
+    Results are cached for 5 minutes per URL to prevent WAF/IP ban risk at scale.
     """
     norm_url = url.strip()
     if not norm_url.startswith(("http://", "https://")):
         norm_url = f"https://{norm_url}"
+
+    # Return cached result if within TTL — WAF ban prevention
+    cached = _portal_health_cache.get(norm_url)
+    if cached:
+        result, cached_at = cached
+        age_seconds = time.perf_counter() - cached_at
+        if age_seconds < _PORTAL_HEALTH_TTL_SECONDS:
+            return {**result, "cached": True, "cacheAgeSeconds": round(age_seconds)}
 
     start = time.perf_counter()
     try:
@@ -232,25 +254,31 @@ async def check_portal_health(url: str):
             else:
                 congestion = "unhealthy"
 
-            return {
+            result = {
                 "url": norm_url,
                 "reachable": True,
                 "statusCode": resp.status_code,
                 "latencyMs": elapsed_ms,
                 "congestion": congestion,
+                "cached": False,
                 "checkedAt": datetime.now(timezone.utc).isoformat()
             }
+            _portal_health_cache[norm_url] = (result, time.perf_counter())
+            return result
     except httpx.TimeoutException:
         elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
-        return {
+        result = {
             "url": norm_url,
             "reachable": False,
             "statusCode": 504,
             "latencyMs": elapsed_ms,
             "congestion": "unhealthy",
+            "cached": False,
             "error": "Gateway timeout: government portal server is unresponsive (> 4.0s).",
             "checkedAt": datetime.now(timezone.utc).isoformat()
         }
+        _portal_health_cache[norm_url] = (result, time.perf_counter())
+        return result
     except Exception as exc:
         elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
         return {
@@ -259,7 +287,9 @@ async def check_portal_health(url: str):
             "statusCode": None,
             "latencyMs": elapsed_ms,
             "congestion": "offline",
+            "cached": False,
             "error": f"Portal connection failed: {str(exc)}",
             "checkedAt": datetime.now(timezone.utc).isoformat()
         }
+
 

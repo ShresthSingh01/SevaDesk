@@ -159,11 +159,12 @@ SevaDesk maintains multi-tiered automated verification:
 
 1. **Shared Core & Logic (`packages/core-types`):**
    - Node.js native test runner (`node --test tests/*.test.js`).
-   - 11 unit tests verifying Verhoeff checksums, preflight rules, candidate parsers, and cipher safety.
+   - 18 unit tests verifying Verhoeff checksums, preflight rules, candidate parsers, status transitions, locked applications, and cipher safety.
 2. **Local Python Daemon (`services/local-core`):**
    - Pytest suite (`pytest services/local-core/tests`).
-   - 12 unit tests verifying Verhoeff checksums, AES-256-GCM encryption/decryption, SHA-256 audit chaining and tamper detection, in-memory bridge session dispatch, SQLite transactions, multilingual audio synthesis, and real-time portal health socket probing.
-3. **Workspace Frontend (`apps/workspace`):**
+   - 16 unit tests verifying Verhoeff checksums, AES-256-GCM encryption/decryption, SHA-256 audit chaining and tamper detection, in-memory bridge session dispatch, SQLite transactions, multilingual audio synthesis, and real-time portal health socket probing.
+3. **Workspace Frontend & Simulator (`apps/workspace`):**
    - TypeScript compiler (`tsc --noEmit`) and Vite production bundle compilation (`vite build`).
+   - Integrated State Portal Simulator with direct SevaDesk bridge auto-fill (`⚡ Auto-Fill from SevaDesk`), document size compliance checking, and receipt generation.
 4. **End-to-End Orchestration:**
-   - Single root command: `npm run test:all` executes all test suites sequentially (23 passed tests, 0 failures).
+   - Single root command: `npm run test:all` executes all test suites sequentially (34 passed tests, 0 failures, 100% clean production bundle).

@@ -124,6 +124,15 @@ class Repository:
         enc_bank = encrypt_sensitive_field(data.get('bankAccount', ''))
 
         if existing:
+            # Check if citizen is linked to any locked applications (submitted or closed)
+            locked_app = conn.execute(
+                "SELECT id, status FROM applications WHERE citizen_id = ? AND status IN ('submitted', 'closed') LIMIT 1;",
+                (citizen_id,)
+            ).fetchone()
+            if locked_app:
+                conn.close()
+                raise ValueError(f"Cannot modify citizen data: linked to locked case {locked_app[0]} ({locked_app[1]}).")
+
             conn.execute("""
                 UPDATE citizens SET
                     full_name = ?, dob = ?, gender = ?, mobile = ?, email = ?,
@@ -274,6 +283,17 @@ class Repository:
         preflight_json = json.dumps(data.get('preflight')) if data.get('preflight') else None
 
         if existing:
+            curr_row = conn.execute("SELECT status FROM applications WHERE id = ?;", (app_id,)).fetchone()
+            if curr_row:
+                curr_status = curr_row[0]
+                new_status = data.get('status', curr_status)
+                if curr_status == 'closed' and new_status != 'closed':
+                    conn.close()
+                    raise ValueError("Closed applications are immutable and cannot be modified.")
+                if curr_status == 'submitted' and new_status in ['draft', 'needs_correction', 'ready', 'in_portal']:
+                    conn.close()
+                    raise ValueError(f"Cannot reverse submitted application to '{new_status}'. Only rejection or closure is permitted.")
+
             conn.execute("""
                 UPDATE applications SET
                     status = ?, receipt_reference = ?, operator_notes = ?, preflight_snapshot = ?,
@@ -299,6 +319,7 @@ class Repository:
 
         conn.commit()
         conn.close()
+        data['id'] = app_id
         return data
 
     @staticmethod

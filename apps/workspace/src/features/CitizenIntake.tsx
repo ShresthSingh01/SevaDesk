@@ -16,33 +16,69 @@ import {
   X,
   ChevronDown,
   ChevronUp,
-  Filter
+  Filter,
+  FileText,
+  Trash2,
+  Paperclip,
+  FileCheck,
+  RefreshCw,
+  Printer,
+  PenTool
 } from 'lucide-react';
-import { Citizen, ServiceDefinition, OcrCandidate, extractOcrCandidates, maskIdentifier, validateCitizen } from '@sevadesk/core-types';
+import { 
+  Citizen, 
+  ServiceDefinition, 
+  ApplicationDocument, 
+  OcrCandidate, 
+  extractOcrCandidates, 
+  maskIdentifier, 
+  validateCitizen,
+  DocumentSlotDefinition
+} from '@sevadesk/core-types';
+import { PrintableProformaModal } from '../components/PrintableProformaModal';
 import { requestOcrScan } from '../lib/api';
-import { playOcrReadbackSpeech, getOcrReadbackText } from '../lib/speech';
+import { playOcrReadbackSpeech, getOcrReadbackText, playFeeSpeech } from '../lib/speech';
+import { optimizeImageForPortal, formatBytes, fileToDataUrl } from '../lib/imageCompressor';
 import Tesseract from 'tesseract.js';
 
 interface CitizenIntakeProps {
   initialCitizen?: Citizen | null;
   services?: ServiceDefinition[];
-  onSave: (citizen: Citizen, targetServiceId?: string) => Promise<void>;
+  citizens?: Citizen[];
+  onSave: (
+    citizen: Citizen,
+    targetServiceId?: string,
+    documents?: ApplicationDocument[],
+    rawFiles?: File[],
+    launchDirectly?: boolean,
+    feeCollected?: boolean
+  ) => Promise<void>;
   onCancel: () => void;
   daemonConnected: boolean;
+  isLocked?: boolean;
+  lockedReason?: string;
 }
 
 export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
   initialCitizen,
   services = [],
+  citizens = [],
   onSave,
   onCancel,
-  daemonConnected
+  daemonConnected,
+  isLocked = false,
+  lockedReason
 }) => {
   const [selectedServiceId, setSelectedServiceId] = useState<string>(services[0]?.id || '');
   const [serviceSearchQuery, setServiceSearchQuery] = useState('');
   const [serviceCategory, setServiceCategory] = useState('All');
   const [isServicePickerOpen, setIsServicePickerOpen] = useState(false);
   const [showAllOptionalFields, setShowAllOptionalFields] = useState(false);
+  const [feeCollected, setFeeCollected] = useState(false);
+
+  // Returning Citizen Fast Lookup State
+  const [citizenSearchQuery, setCitizenSearchQuery] = useState('');
+  const [loadedCitizenName, setLoadedCitizenName] = useState<string | null>(initialCitizen?.fullName || null);
 
   const [formData, setFormData] = useState<Partial<Citizen>>(
     initialCitizen || {
@@ -81,8 +117,42 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
   const [audioLang, setAudioLang] = useState('hi-IN');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [readbackVerified, setReadbackVerified] = useState(false);
+  const [activeProformaSlot, setActiveProformaSlot] = useState<DocumentSlotDefinition | null>(null);
+
+  // Document attachments for application
+  interface AttachedDocItem {
+    id: string;
+    name: string;
+    size: number;
+    type: string;
+    role?: string;
+    slotId?: string;
+    file: File;
+    dataUrl?: string;
+    isOptimizing?: boolean;
+    isOptimized?: boolean;
+    error?: string;
+  }
+  const [attachedDocs, setAttachedDocs] = useState<AttachedDocItem[]>([]);
+  const [toastNotice, setToastNotice] = useState<string | null>(null);
+  const docFileInputRef = useRef<HTMLInputElement | null>(null);
+  const activeSlotInputRef = useRef<{ slotId: string; maxKB: number } | null>(null);
+  const slotFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedService = services.find(s => s.id === selectedServiceId);
+
+  // Live Counter-Desk Synchronization for Secondary Citizen Monitor (?view=citizen)
+  React.useEffect(() => {
+    if (selectedService) {
+      try {
+        localStorage.setItem('seva_citizen_display_sync', JSON.stringify({
+          service: selectedService,
+          citizenName: formData.fullName || null,
+          timestamp: Date.now()
+        }));
+      } catch {}
+    }
+  }, [selectedService, formData.fullName]);
 
   const getPortalHostname = (urlStr?: string) => {
     if (!urlStr) return 'Govt Portal';
@@ -136,6 +206,106 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
     return getServiceCategory(s) === serviceCategory;
   });
 
+  const POPULAR_SCHEMES = [
+    { id: 'srv-up-income', label: 'UP Income (आय)', icon: '📜' },
+    { id: 'srv-up-caste', label: 'Caste (जाति)', icon: '🏛️' },
+    { id: 'srv-up-domicile', label: 'Domicile (निवास)', icon: '🏠' },
+    { id: 'srv-pm-kisan', label: 'PM-Kisan (किसान)', icon: '🌾' },
+    { id: 'srv-parivahan-dl', label: 'Driving License (DL)', icon: '🚗' },
+  ];
+
+  // Fast search filter for existing citizens
+  const matchingCitizens = citizenSearchQuery.trim()
+    ? (citizens || []).filter(c =>
+        (c.fullName && c.fullName.toLowerCase().includes(citizenSearchQuery.toLowerCase())) ||
+        (c.mobile && c.mobile.includes(citizenSearchQuery)) ||
+        (c.aadhaar && c.aadhaar.includes(citizenSearchQuery))
+      )
+    : [];
+
+  const handleSelectExistingCitizen = (citizen: Citizen) => {
+    setFormData({ ...citizen });
+    setConsentChecked(Boolean(citizen.consentAt));
+    setLoadedCitizenName(citizen.fullName);
+    setCitizenSearchQuery('');
+    setFormErrors([]);
+  };
+
+  const handleClearSelectedCitizen = () => {
+    setFormData({
+      fullName: '',
+      dob: '',
+      gender: '',
+      mobile: '',
+      email: '',
+      address: '',
+      state: '',
+      district: '',
+      pincode: '',
+      aadhaar: '',
+      voterId: '',
+      rationCard: '',
+      bankAccount: '',
+      ifsc: '',
+      consentAt: '',
+      consentPurpose: ''
+    });
+    setConsentChecked(false);
+    setLoadedCitizenName(null);
+  };
+
+  const handleAttachFiles = async (files: File[], defaultRole?: string, targetMaxKB?: number) => {
+    if (!files.length) return;
+    const targetMB = targetMaxKB ? (targetMaxKB / 1024) : (selectedService?.maxUploadMB || 0.10);
+    
+    for (const f of files) {
+      const lower = f.name.toLowerCase();
+      const assignedRole = defaultRole || (
+        lower.includes('photo') ? 'photo' :
+        lower.includes('declaration') ? 'declaration' :
+        lower.includes('income') ? 'incomeProof' :
+        lower.includes('aadhaar') || lower.includes('id_') ? 'identityProof' : 'document'
+      );
+      const isOversized = f.type.startsWith('image/') && (f.size > targetMB * 1024 * 1024);
+      
+      let optimizedFile = f;
+      if (isOversized) {
+        try {
+          const res = await optimizeImageForPortal(f, targetMB);
+          optimizedFile = res.optimizedFile;
+        } catch (err: any) {
+          console.warn('Auto-optimization failed:', err);
+        }
+      }
+
+      let dataUrl: string | undefined;
+      try {
+        dataUrl = await fileToDataUrl(optimizedFile);
+      } catch (err) {
+        console.warn('DataURL generation failed:', err);
+      }
+
+      const item: AttachedDocItem = {
+        id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        name: optimizedFile.name,
+        size: optimizedFile.size,
+        type: optimizedFile.type,
+        role: assignedRole,
+        slotId: defaultRole || assignedRole,
+        file: optimizedFile,
+        dataUrl: dataUrl,
+        isOptimizing: false,
+        isOptimized: true
+      };
+
+      setAttachedDocs(prev => {
+        // Replace existing document if it belongs to the same slot/role
+        const filtered = prev.filter(d => (defaultRole ? (d.slotId !== defaultRole && d.role !== defaultRole) : d.name !== f.name));
+        return [...filtered, item];
+      });
+    }
+  };
+
   const allFieldKeys: (keyof Citizen)[] = [
     'fullName', 'dob', 'gender', 'mobile', 'email', 'address', 'district', 'state', 'pincode', 'aadhaar', 'voterId', 'rationCard', 'bankAccount', 'ifsc'
   ];
@@ -171,6 +341,9 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
     setOcrCandidates([]);
     setSelectedCandidateKeys(new Set());
     setOcrMessage('');
+    if (file) {
+      handleAttachFiles([file], 'identityProof');
+    }
   };
 
   const startCamera = async () => {
@@ -186,7 +359,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
         }
       }, 100);
     } catch {
-      alert('Could not access webcam/scanner. Please ensure camera permissions are allowed, or choose "Upload image" / "Demo Card".');
+      alert('Could not access webcam/scanner. Please ensure camera permissions are allowed, or choose "Upload scan".');
     }
   };
 
@@ -213,94 +386,11 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
         setOcrText('');
         setOcrCandidates([]);
         setSelectedCandidateKeys(new Set());
-        setOcrMessage('ID photo captured from camera. Click "Run OCR analysis" to extract details.');
+        setOcrMessage('ID photo captured from camera & auto-attached to case documents. Click "Run OCR analysis" to extract details.');
         stopCamera();
+        handleAttachFiles([file], 'identityProof');
       }
     }, 'image/jpeg', 0.92);
-  };
-
-  const loadDemoCard = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 1000;
-    canvas.height = 630;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Card background
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Border
-    ctx.lineWidth = 6;
-    ctx.strokeStyle = '#c8cfbf';
-    ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
-
-    // Top tri-color stripe
-    ctx.fillStyle = '#ff9933';
-    ctx.fillRect(16, 16, canvas.width - 32, 16);
-    ctx.fillStyle = '#138808';
-    ctx.fillRect(16, 32, canvas.width - 32, 16);
-
-    // Header
-    ctx.fillStyle = '#1f2923';
-    ctx.font = 'bold 26px sans-serif';
-    ctx.fillText('Government of India / भारत सरकार', 240, 90);
-
-    // Photo box
-    ctx.fillStyle = '#e4e8dc';
-    ctx.fillRect(50, 130, 190, 240);
-    ctx.strokeStyle = '#87978d';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(50, 130, 190, 240);
-    ctx.fillStyle = '#5c6b62';
-    ctx.font = 'bold 18px sans-serif';
-    ctx.fillText('CITIZEN PHOTO', 80, 255);
-
-    // Identity fields
-    ctx.fillStyle = '#1f2923';
-    ctx.font = 'bold 26px sans-serif';
-    ctx.fillText('Rajesh Kumar Sharma', 270, 170);
-    ctx.font = '22px sans-serif';
-    ctx.fillText('DOB: 15/08/1985', 270, 220);
-    ctx.fillText('Gender: Male / पुरुष', 270, 265);
-    ctx.fillText('PIN: 110001', 270, 310);
-
-    // Valid Verhoeff 12-digit number
-    ctx.fillStyle = '#c53030';
-    ctx.font = 'bold 36px monospace';
-    ctx.fillText('9999  9999  9999', 320, 480);
-
-    // Bottom banner
-    ctx.fillStyle = '#1b4332';
-    ctx.fillRect(16, canvas.height - 40, canvas.width - 32, 24);
-
-    canvas.toBlob(blob => {
-      if (blob) {
-        const file = new File([blob], 'demo_aadhaar_card.jpg', { type: 'image/jpeg' });
-        setOcrFile(file);
-        setOcrText('');
-        const demoCandidates: OcrCandidate[] = [
-          { key: 'fullName', label: 'Full name', value: 'Rajesh Kumar Sharma', confidence: 'High' },
-          { key: 'dob', label: 'Date of birth', value: '1985-08-15', confidence: 'High' },
-          { key: 'gender', label: 'Gender', value: 'Male', confidence: 'High' },
-          { key: 'pincode', label: 'PIN code', value: '110001', confidence: 'High' },
-          { key: 'aadhaar', label: 'Aadhaar number', value: '999999999999', confidence: 'High', sensitive: true }
-        ];
-        setOcrCandidates(demoCandidates);
-        setSelectedCandidateKeys(new Set(demoCandidates.map(c => c.key)));
-        setFormData(prev => ({
-          ...prev,
-          fullName: 'Rajesh Kumar Sharma',
-          dob: '1985-08-15',
-          gender: 'Male',
-          pincode: '110001',
-          aadhaar: '999999999999'
-        }));
-        setOcrEngineUsed('Demo Engine (Verhoeff Verified)');
-        setOcrMessage('⚡ Demo Aadhaar card loaded & smart auto-filled 5 fields into form!');
-        setFormErrors([]);
-      }
-    }, 'image/jpeg', 0.95);
   };
 
   const handleRunOcr = async () => {
@@ -314,6 +404,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
       let backendCandidates: OcrCandidate[] = [];
 
       if (ocrFile) {
+        handleAttachFiles([ocrFile], 'identityProof');
         if (daemonConnected) {
           setOcrMessage('Analyzing document with Local Intelligence Core (PaddleOCR)...');
           try {
@@ -393,10 +484,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
     }
   };
 
-  const isAutoFilled = (key: string) => {
-    return ocrCandidates.some(c => c.key === key && selectedCandidateKeys.has(key) && Boolean(formData[key as keyof Citizen]));
-  };
-
   const handleApplyOcr = () => {
     const updates: Partial<Citizen> = {};
     for (const cand of ocrCandidates) {
@@ -454,23 +541,55 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleRemoveDoc = (id: string) => {
+    setAttachedDocs(prev => prev.filter(d => d.id !== id));
+  };
+
+  const handleSubmitWithAction = async (e: React.FormEvent, launchDirectly: boolean = false) => {
     e.preventDefault();
     setFormErrors([]);
 
-    if (!consentChecked) {
-      setFormErrors(['Citizen consent must be recorded before saving personal records.']);
+    if (isLocked) {
+      setFormErrors(['This applicant record is locked because it is linked to a submitted or closed application. Demographic data cannot be modified.']);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
-    const fieldsToValidate = selectedService?.requiredFields && selectedService.requiredFields.length > 0
-      ? Array.from(new Set(['fullName', ...selectedService.requiredFields])) as any
-      : ['fullName'];
-
-    const valResult = validateCitizen(formData, fieldsToValidate);
-    if (!valResult.valid) {
-      setFormErrors(valResult.errors.map(err => err.message));
+    if (!consentChecked) {
+      setFormErrors(['Explicit Citizen Consent is required under DPDP Act 2023 before creating or dispatching records. Please tick the consent checkbox below.']);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
+    }
+
+    // Flaw 3: Pre-save preflight check in CitizenIntake before calling onSave
+    if (selectedService) {
+      const fieldsToValidate = selectedService.requiredFields && selectedService.requiredFields.length > 0
+        ? Array.from(new Set(['fullName', ...selectedService.requiredFields])) as any
+        : ['fullName'];
+
+      const valResult = validateCitizen(formData, fieldsToValidate);
+      if (!valResult.valid) {
+        const missingCount = valResult.errors.length;
+        const missingLabels = valResult.errors.map(err => err.label || err.field).join(', ');
+        setFormErrors([
+          `Preflight Check Failed: ${missingCount} required field(s) missing for ${selectedService.name} (${missingLabels}). Fill them before proceeding.`
+        ]);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+
+      // Check document sizes against portal limit
+      if (selectedService.maxUploadMB && attachedDocs.length > 0) {
+        const maxBytes = selectedService.maxUploadMB * 1024 * 1024;
+        const oversized = attachedDocs.filter(d => d.size > maxBytes && !d.isOptimizing);
+        if (oversized.length > 0) {
+          setFormErrors([
+            `Document "${oversized[0].name}" (${formatBytes(oversized[0].size)}) exceeds the ${selectedService.maxUploadMB} MB portal limit. Please wait for auto-optimization or upload a compliant file.`
+          ]);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          return;
+        }
+      }
     }
 
     const now = new Date().toISOString();
@@ -500,8 +619,21 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
       updatedAt: now
     };
 
-    await onSave(citizenToSave, selectedServiceId || undefined);
+    const finalDocs: ApplicationDocument[] = attachedDocs.map(d => ({
+      name: d.name,
+      size: d.size,
+      type: d.type,
+      role: d.role,
+      slotId: d.slotId || d.role,
+      dataUrl: d.dataUrl,
+      optimised: d.isOptimized
+    }));
+    const rawFilesToPass = attachedDocs.map(d => d.file);
+
+    await onSave(citizenToSave, selectedServiceId || undefined, finalDocs, rawFilesToPass, launchDirectly, feeCollected);
   };
+
+  const handleSubmit = (e: React.FormEvent) => handleSubmitWithAction(e, Boolean(selectedServiceId));
 
   return (
     <div>
@@ -516,9 +648,213 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             Select the government service, capture details via physical document OCR, and launch the application directly into portal handoff.
           </p>
         </div>
-        <button className="btn btn-secondary" onClick={onCancel}>
-          Cancel
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn btn-secondary" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      </div>
+
+      {/* Locked Record Warning Banner */}
+      {isLocked && (
+        <div style={{
+          padding: '14px 18px',
+          borderRadius: 'var(--radius-md)',
+          backgroundColor: 'var(--status-warn-bg)',
+          border: '1px solid var(--status-warn)',
+          color: 'var(--status-warn)',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px'
+        }}>
+          <ShieldAlert size={20} style={{ flexShrink: 0 }} />
+          <div>
+            <strong style={{ fontSize: '0.9rem' }}>Applicant Record Permanently Locked (Read-Only)</strong>
+            <p style={{ margin: '3px 0 0', fontSize: '0.8rem', opacity: 0.9 }}>
+              {lockedReason || 'This citizen record is attached to a submitted or closed application.'} Under DPDP Act rules and audit trail integrity, applicant demographic particulars cannot be altered once submitted or closed.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notice Banner */}
+      {toastNotice && (
+        <div style={{
+          padding: '12px 18px',
+          borderRadius: 'var(--radius-md)',
+          backgroundColor: 'var(--status-good-bg)',
+          border: '1px solid var(--primary-border)',
+          color: 'var(--status-good)',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <CheckCircle2 size={18} color="var(--primary)" />
+            <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{toastNotice}</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-xs"
+            onClick={() => setToastNotice(null)}
+            style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+          >
+            ✕ Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Returning Citizen Fast Lookup Bar */}
+      {!initialCitizen && (
+        <div className="panel" style={{ marginBottom: '18px', padding: '14px 18px', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-light)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Search size={16} color="var(--primary)" />
+              <strong style={{ fontSize: '0.88rem' }}>Returning Citizen Quick Lookup</strong>
+            </div>
+            {loadedCitizenName && (
+              <span style={{ fontSize: '0.78rem', color: 'var(--status-good)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <CheckCircle2 size={14} /> Profile Loaded: <strong>{loadedCitizenName}</strong>
+                <button
+                  type="button"
+                  onClick={handleClearSelectedCitizen}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', marginLeft: '6px', textDecoration: 'underline', fontSize: '0.75rem' }}
+                >
+                  Clear
+                </button>
+              </span>
+            )}
+          </div>
+          <div style={{ position: 'relative' }}>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="Type mobile number, Aadhaar number, or name to auto-load an existing citizen..."
+              value={citizenSearchQuery}
+              onChange={e => setCitizenSearchQuery(e.target.value)}
+              style={{ fontSize: '0.85rem' }}
+            />
+            {citizenSearchQuery.trim().length > 0 && (
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                zIndex: 50,
+                backgroundColor: 'var(--bg-card)',
+                border: '1px solid var(--border-light)',
+                borderRadius: 'var(--radius-md)',
+                boxShadow: 'var(--shadow-lg)',
+                maxHeight: '220px',
+                overflowY: 'auto',
+                marginTop: '4px'
+              }}>
+                {matchingCitizens.length === 0 ? (
+                  <div style={{ padding: '12px 16px', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    No registered citizens found matching "{citizenSearchQuery}". Continue typing below to create a new record.
+                  </div>
+                ) : (
+                  matchingCitizens.map(c => (
+                    <div
+                      key={c.id}
+                      onClick={() => handleSelectExistingCitizen(c)}
+                      style={{
+                        padding: '10px 16px',
+                        borderBottom: '1px solid var(--border-light)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        transition: 'background-color 0.15s ease'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-hover, rgba(0,0,0,0.03))'}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      <div>
+                        <strong style={{ fontSize: '0.88rem', display: 'block' }}>{c.fullName}</strong>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          📱 {c.mobile || 'No phone'} · {c.district ? `${c.district}, ${c.state}` : (c.state || 'Address on file')}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-xs"
+                        style={{ fontSize: '0.75rem', pointerEvents: 'none' }}
+                      >
+                        Load Profile →
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Popular Scheme Chips Selector */}
+      <div style={{ marginBottom: '18px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Target Scheme / Service:
+          </div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+            {selectedService ? (
+              <span>Form customized for: <strong style={{ color: 'var(--text-main)' }}>{selectedService.name.split('(')[0].trim()}</strong></span>
+            ) : (
+              <span>All 14 citizen fields visible (Generic Mode)</span>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {POPULAR_SCHEMES.map(scheme => {
+            const isSelected = selectedServiceId === scheme.id;
+            return (
+              <button
+                key={scheme.id}
+                type="button"
+                onClick={() => {
+                  setSelectedServiceId(scheme.id);
+                  setIsServicePickerOpen(false);
+                }}
+                className={`btn ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
+                style={{
+                  fontSize: '0.82rem',
+                  padding: '6px 14px',
+                  borderRadius: 'var(--radius-full)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontWeight: isSelected ? 700 : 500
+                }}
+              >
+                <span>{scheme.icon}</span>
+                <span>{scheme.label}</span>
+                {isSelected && <Check size={13} />}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setIsServicePickerOpen(prev => !prev)}
+            className={`btn ${isServicePickerOpen ? 'btn-primary' : 'btn-secondary'}`}
+            style={{
+              fontSize: '0.82rem',
+              padding: '6px 14px',
+              borderRadius: 'var(--radius-full)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <Search size={13} />
+            <span>More Services ({services.length})</span>
+            <ChevronDown size={13} style={{ transform: isServicePickerOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+          </button>
+        </div>
       </div>
 
       {/* Target Government Scheme / Service Selector Card */}
@@ -764,9 +1100,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                     </p>
                   </div>
                 </div>
-                <span className="status-pill good" style={{ padding: '3px 8px', fontSize: '0.72rem' }}>
-                  ★ Clean View Active
-                </span>
               </div>
 
               <div className="form-grid">
@@ -774,8 +1107,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                   <div className="form-group full">
                     <label className="form-label" htmlFor="fullName">
                       Full name *
-                      {isAutoFilled('fullName') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                      {isFieldRequired('fullName') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
                     </label>
                     <input
                       id="fullName"
@@ -791,9 +1122,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 {isFieldVisible('dob') && (
                   <div className="form-group">
                     <label className="form-label" htmlFor="dob">
-                      Date of birth
-                      {isAutoFilled('dob') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                      {isFieldRequired('dob') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      Date of birth {isFieldRequired('dob') && '*'}
                     </label>
                     <input
                       id="dob"
@@ -808,9 +1137,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 {isFieldVisible('gender') && (
                   <div className="form-group">
                     <label className="form-label" htmlFor="gender">
-                      Gender
-                      {isAutoFilled('gender') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                      {isFieldRequired('gender') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      Gender {isFieldRequired('gender') && '*'}
                     </label>
                     <select
                       id="gender"
@@ -830,9 +1157,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 {isFieldVisible('mobile') && (
                   <div className="form-group">
                     <label className="form-label" htmlFor="mobile">
-                      Mobile number (10 digits)
-                      {isAutoFilled('mobile') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                      {isFieldRequired('mobile') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      Mobile number (10 digits) {isFieldRequired('mobile') && '*'}
                     </label>
                     <input
                       id="mobile"
@@ -849,8 +1174,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 {isFieldVisible('email') && (
                   <div className="form-group">
                     <label className="form-label" htmlFor="email">
-                      Email address
-                      {isFieldRequired('email') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      Email address {isFieldRequired('email') && '*'}
                     </label>
                     <input
                       id="email"
@@ -866,9 +1190,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 {isFieldVisible('address') && (
                   <div className="form-group full">
                     <label className="form-label" htmlFor="address">
-                      Address
-                      {isAutoFilled('address') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                      {isFieldRequired('address') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      Address {isFieldRequired('address') && '*'}
                     </label>
                     <input
                       id="address"
@@ -883,9 +1205,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 {isFieldVisible('district') && (
                   <div className="form-group">
                     <label className="form-label" htmlFor="district">
-                      District
-                      {isAutoFilled('district') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                      {isFieldRequired('district') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      District {isFieldRequired('district') && '*'}
                     </label>
                     <input
                       id="district"
@@ -900,9 +1220,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 {isFieldVisible('state') && (
                   <div className="form-group">
                     <label className="form-label" htmlFor="state">
-                      State / UT
-                      {isAutoFilled('state') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                      {isFieldRequired('state') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      State / UT {isFieldRequired('state') && '*'}
                     </label>
                     <input
                       id="state"
@@ -917,9 +1235,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 {isFieldVisible('pincode') && (
                   <div className="form-group">
                     <label className="form-label" htmlFor="pincode">
-                      PIN code (6 digits)
-                      {isAutoFilled('pincode') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                      {isFieldRequired('pincode') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      PIN code (6 digits) {isFieldRequired('pincode') && '*'}
                     </label>
                     <input
                       id="pincode"
@@ -936,9 +1252,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                   <div className="form-group">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <label className="form-label" htmlFor="aadhaar">
-                        Aadhaar (12 digits)
-                        {isAutoFilled('aadhaar') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                        {isFieldRequired('aadhaar') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                        Aadhaar (12 digits) {isFieldRequired('aadhaar') && '*'}
                       </label>
                       <button
                         type="button"
@@ -964,8 +1278,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 {isFieldVisible('voterId') && (
                   <div className="form-group">
                     <label className="form-label" htmlFor="voterId">
-                      Voter ID / EPIC
-                      {isFieldRequired('voterId') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      Voter ID / EPIC {isFieldRequired('voterId') && '*'}
                     </label>
                     <input
                       id="voterId"
@@ -980,8 +1293,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 {isFieldVisible('rationCard') && (
                   <div className="form-group">
                     <label className="form-label" htmlFor="rationCard">
-                      Ration card number
-                      {isFieldRequired('rationCard') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      Ration card number {isFieldRequired('rationCard') && '*'}
                     </label>
                     <input
                       id="rationCard"
@@ -997,8 +1309,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                   <div className="form-group">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <label className="form-label" htmlFor="bankAccount">
-                        Bank account number
-                        {isFieldRequired('bankAccount') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                        Bank account number {isFieldRequired('bankAccount') && '*'}
                       </label>
                       <button
                         type="button"
@@ -1023,9 +1334,7 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 {isFieldVisible('ifsc') && (
                   <div className="form-group">
                     <label className="form-label" htmlFor="ifsc">
-                      IFSC code (11 characters)
-                      {isAutoFilled('ifsc') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
-                      {isFieldRequired('ifsc') && <span className="status-pill warn" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>★ Service Req</span>}
+                      IFSC code (11 characters) {isFieldRequired('ifsc') && '*'}
                     </label>
                     <input
                       id="ifsc"
@@ -1068,7 +1377,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 <div className="form-group full">
                   <label className="form-label" htmlFor="fullName">
                     Full name *
-                    {isAutoFilled('fullName') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
                   </label>
                   <input
                     id="fullName"
@@ -1083,7 +1391,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 <div className="form-group">
                   <label className="form-label" htmlFor="dob">
                     Date of birth
-                    {isAutoFilled('dob') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
                   </label>
                   <input
                     id="dob"
@@ -1097,7 +1404,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 <div className="form-group">
                   <label className="form-label" htmlFor="gender">
                     Gender
-                    {isAutoFilled('gender') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
                   </label>
                   <select
                     id="gender"
@@ -1116,7 +1422,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 <div className="form-group">
                   <label className="form-label" htmlFor="mobile">
                     Mobile number (10 digits)
-                    {isAutoFilled('mobile') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
                   </label>
                   <input
                     id="mobile"
@@ -1144,7 +1449,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 <div className="form-group full">
                   <label className="form-label" htmlFor="address">
                     Address
-                    {isAutoFilled('address') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
                   </label>
                   <input
                     id="address"
@@ -1158,7 +1462,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 <div className="form-group">
                   <label className="form-label" htmlFor="district">
                     District
-                    {isAutoFilled('district') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
                   </label>
                   <input
                     id="district"
@@ -1172,7 +1475,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 <div className="form-group">
                   <label className="form-label" htmlFor="state">
                     State / UT
-                    {isAutoFilled('state') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
                   </label>
                   <input
                     id="state"
@@ -1186,7 +1488,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 <div className="form-group">
                   <label className="form-label" htmlFor="pincode">
                     PIN code (6 digits)
-                    {isAutoFilled('pincode') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
                   </label>
                   <input
                     id="pincode"
@@ -1214,7 +1515,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <label className="form-label" htmlFor="aadhaar">
                       Aadhaar (12 digits)
-                      {isAutoFilled('aadhaar') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
                     </label>
                     <button
                       type="button"
@@ -1287,7 +1587,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 <div className="form-group">
                   <label className="form-label" htmlFor="ifsc">
                     IFSC code (11 characters)
-                    {isAutoFilled('ifsc') && <span className="status-pill good" style={{ padding: '1px 6px', fontSize: '0.65rem', marginLeft: '6px' }}>⚡ Auto-filled</span>}
                   </label>
                   <input
                     id="ifsc"
@@ -1303,6 +1602,271 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
           )}
 
           <div style={{ margin: '24px 0', borderTop: '1px solid var(--border-light)' }} />
+
+          {/* Flaw 2: Required Documents Section (Only when service is selected) */}
+          {selectedService && (
+            <div style={{
+              margin: '20px 0',
+              padding: '18px 20px',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--border-strong)',
+              backgroundColor: 'var(--bg-subtle)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Paperclip size={18} color="var(--primary)" />
+                  <strong style={{ fontSize: '0.95rem', color: 'var(--text-main)' }}>
+                    Required Service Documents ({selectedService.name.split('(')[0].trim()})
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="file"
+                    ref={docFileInputRef}
+                    multiple
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    style={{ display: 'none' }}
+                    onChange={e => {
+                      handleAttachFiles(Array.from(e.target.files || []));
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-xs"
+                    onClick={() => docFileInputRef.current?.click()}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                  >
+                    <Upload size={13} /> Attach physical docs
+                  </button>
+                </div>
+              </div>
+
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 12px 0' }}>
+                {selectedService.notes || 'Attach applicant identity & supporting documents.'}
+                {' '}(Portal upload constraint: max {selectedService.maxUploadMB ? `${selectedService.maxUploadMB * 1024 < 1024 ? `${selectedService.maxUploadMB * 1024} KB` : `${selectedService.maxUploadMB} MB`}` : '100 KB'} per document, allowed formats: {selectedService.allowedExtensions?.join(', ') || 'pdf, jpg'}). Oversized images are auto-optimized on attach.
+              </p>
+
+              {/* Explicit Slot-Based Targets */}
+              {selectedService.documentSlots && selectedService.documentSlots.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+                  {selectedService.documentSlots.map(slot => {
+                    const attached = attachedDocs.find(d => d.slotId === slot.id || d.role === slot.id);
+                    return (
+                      <div
+                        key={slot.id}
+                        style={{
+                          padding: '12px 14px',
+                          borderRadius: 'var(--radius-md)',
+                          border: `1px solid ${attached ? 'var(--status-good)' : slot.required ? 'var(--primary-border)' : 'var(--border-light)'}`,
+                          backgroundColor: attached ? 'var(--status-good-bg)' : '#ffffff',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          gap: '8px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <strong style={{ fontSize: '0.84rem', color: 'var(--text-main)', display: 'block' }}>
+                              {slot.label}
+                            </strong>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                              Limit: ≤ {slot.maxKB} KB ({slot.allowedExtensions.join(', ')})
+                            </span>
+                          </div>
+                          <span className={`status-pill ${attached ? 'good' : slot.required ? 'warn' : 'neutral'}`} style={{ fontSize: '0.65rem' }}>
+                            {attached ? '✓ Ready' : slot.required ? '★ Mandatory' : 'Optional'}
+                          </span>
+                        </div>
+
+                        {attached ? (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                              <FileCheck size={14} color="var(--status-good)" style={{ flexShrink: 0 }} />
+                              <span style={{ fontSize: '0.76rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={attached.name}>
+                                {attached.name} ({formatBytes(attached.size)})
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              {slot.proformaType && (
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveProformaSlot(slot)}
+                                  style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: '2px' }}
+                                  title="View or Re-Print Pre-Filled Proforma"
+                                >
+                                  <Printer size={13} />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveDoc(attached.id)}
+                                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
+                                title="Remove document"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            {slot.proformaType && (
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-xs"
+                                onClick={() => setActiveProformaSlot(slot)}
+                                style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontWeight: 700 }}
+                                title="Open & print pre-filled government proforma for citizen signature"
+                              >
+                                <Printer size={12} /> Print Proforma
+                              </button>
+                            )}
+                            <label className="btn btn-secondary btn-xs" style={{ cursor: 'pointer', flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                              <Upload size={12} /> {slot.proformaType ? 'Attach Scan' : 'Attach Document'}
+                              <input
+                                type="file"
+                                accept={slot.allowedExtensions.map(e => `.${e}`).join(',')}
+                                style={{ display: 'none' }}
+                                onChange={e => {
+                                  const f = e.target.files?.[0];
+                                  if (f) handleAttachFiles([f], slot.id, slot.maxKB);
+                                  e.target.value = '';
+                                }}
+                              />
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {attachedDocs.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {attachedDocs.map(doc => {
+                    const maxBytes = (selectedService.maxUploadMB || 0.1) * 1024 * 1024;
+                    const isOver = doc.size > maxBytes;
+                    return (
+                      <div
+                        key={doc.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '8px 12px',
+                          borderRadius: 'var(--radius-sm)',
+                          backgroundColor: '#ffffff',
+                          border: `1px solid ${isOver ? 'var(--status-bad)' : 'var(--border-light)'}`,
+                          fontSize: '0.8rem'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                          <FileText size={16} color="var(--primary)" style={{ flexShrink: 0 }} />
+                          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <strong style={{ color: 'var(--text-main)' }}>{doc.name}</strong>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: '8px' }}>
+                              {doc.role ? `(${doc.role}) · ` : ''}{formatBytes(doc.size)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                          {doc.isOptimizing ? (
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              <RefreshCw size={12} className="animate-spin" /> Optimizing…
+                            </span>
+                          ) : isOver ? (
+                            <span className="status-pill bad" style={{ fontSize: '0.7rem' }}>
+                              Oversized ({formatBytes(doc.size)})
+                            </span>
+                          ) : (
+                            <span className="status-pill good" style={{ fontSize: '0.7rem' }}>
+                              ✓ Ready ({formatBytes(doc.size)})
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDoc(doc.id)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '2px' }}
+                            title="Remove document"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{
+                  padding: '12px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px dashed var(--border-strong)',
+                  textAlign: 'center',
+                  fontSize: '0.75rem',
+                  color: 'var(--text-muted)'
+                }}>
+                  No documents attached yet. Click <strong>"Attach physical docs"</strong> to upload citizen files.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Flaw 3: Pre-Save Preflight Check Status Banner */}
+          {selectedService && (
+            (() => {
+              const reqKeys = (selectedService.requiredFields || []) as (keyof Citizen)[];
+              const missingKeys = reqKeys.filter(k => !String(formData[k] ?? '').trim());
+              const isPassing = missingKeys.length === 0;
+
+              return (
+                <div style={{
+                  padding: '14px 18px',
+                  borderRadius: 'var(--radius-md)',
+                  marginBottom: '20px',
+                  backgroundColor: isPassing ? 'var(--status-good-bg)' : 'var(--status-warn-bg)',
+                  border: `1px solid ${isPassing ? 'var(--primary-border)' : 'var(--status-warn)'}`
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {isPassing ? (
+                        <CheckCircle2 size={16} color="var(--status-good)" />
+                      ) : (
+                        <AlertCircle size={16} color="var(--status-warn)" />
+                      )}
+                      <strong style={{ fontSize: '0.85rem', color: isPassing ? 'var(--status-good)' : 'var(--status-warn)' }}>
+                        {isPassing
+                          ? 'Preflight Verified: 100% of required fields complete'
+                          : `Preflight Check: ${missingKeys.length} of ${reqKeys.length} required fields missing`}
+                      </strong>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: isPassing ? 'var(--status-good)' : 'var(--status-warn)' }}>
+                      {Math.round(((reqKeys.length - missingKeys.length) / (reqKeys.length || 1)) * 100)}% Complete
+                    </span>
+                  </div>
+
+                  {missingKeys.length > 0 && (
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-main)', marginTop: '6px' }}>
+                      <span>Missing mandatory fields: </span>
+                      {missingKeys.map(k => (
+                        <span key={k} className="status-pill warn" style={{ padding: '2px 6px', fontSize: '0.7rem', marginRight: '6px', marginTop: '2px', display: 'inline-block' }}>
+                          {k}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {isPassing && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Applicant demographic particulars and attached documents satisfy {selectedService.name} portal preflight requirements. Ready to launch directly into portal handoff.
+                    </div>
+                  )}
+                </div>
+              );
+            })()
+          )}
 
           {/* Consent Checkbox */}
           <div style={{
@@ -1346,18 +1910,111 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
             </label>
           </div>
 
+          {/* Cash Fee Collection Toggle */}
+          {selectedService && (
+            <div style={{
+              padding: '12px 16px',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: feeCollected ? 'var(--status-good-bg)' : 'var(--bg-subtle)',
+              border: `1px solid ${feeCollected ? 'var(--primary-border)' : 'var(--border-light)'}`,
+              marginBottom: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              transition: 'all 0.2s ease'
+            }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={feeCollected}
+                  onChange={e => setFeeCollected(e.target.checked)}
+                  style={{ accentColor: 'var(--primary)', width: '16px', height: '16px' }}
+                />
+                <div>
+                  <strong style={{ fontSize: '0.86rem', color: 'var(--text-main)' }}>
+                    Cash Fee Collected from Citizen: ₹{(selectedService.officialFee || 0) + (selectedService.operatorCharge || 0)}
+                  </strong>
+                  <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                    Govt Statutory: ₹{selectedService.officialFee ?? 0} + CSC Service Charge: ₹{selectedService.operatorCharge ?? 0} (No hidden fees)
+                  </div>
+                </div>
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-xs"
+                  onClick={async () => {
+                    if (selectedService) {
+                      await playFeeSpeech(selectedService.name, selectedService.officialFee, selectedService.operatorCharge, audioLang);
+                    }
+                  }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.75rem', fontWeight: 600, padding: '4px 10px', backgroundColor: '#ffffff' }}
+                  title="Speak statutory fee and kiosk charge aloud in selected regional language"
+                >
+                  <Volume2 size={13} color="var(--primary)" />
+                  <span>🔊 Announce Fee</span>
+                </button>
+                <span className={`status-pill ${feeCollected ? 'good' : 'neutral'}`} style={{ fontSize: '0.72rem' }}>
+                  {feeCollected ? '✓ Cash Collected' : 'Pending Payment'}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {formErrors.length > 0 && (
+            <div style={{
+              padding: '10px 14px',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--status-bad-bg)',
+              color: 'var(--status-bad)',
+              marginBottom: '14px',
+              fontSize: '0.82rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}>
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              <div>
+                <strong>Cannot Launch: </strong> {formErrors[0]}
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
             <button type="button" className="btn btn-secondary" onClick={onCancel}>
               Cancel
             </button>
-            {selectedService ? (
+            {isLocked ? (
               <button
-                type="submit"
-                className="btn btn-primary"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 20px', fontWeight: 700 }}
+                type="button"
+                className="btn btn-secondary"
+                disabled
+                style={{ opacity: 0.65, cursor: 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                title="This record is locked under an active submitted or closed application."
               >
-                <span>⚡</span> Save & Proceed to Application Case ({selectedService.name.split('(')[0].trim()}) <ArrowRight size={16} />
+                <ShieldAlert size={16} /> Record Locked (Cannot Modify)
               </button>
+            ) : selectedService ? (
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={e => handleSubmitWithAction(e, false)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}
+                  title="Save case as offline draft for later portal submission"
+                >
+                  <span>📥</span> Save Draft (Offline)
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={e => handleSubmitWithAction(e, true)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 20px', fontWeight: 700 }}
+                  title="Save citizen & launch government portal for submission"
+                >
+                  <span>🚀</span> Submit to Portal ({selectedService.name.split('(')[0].trim()}) <ArrowRight size={16} />
+                </button>
+              </div>
             ) : (
               <button type="submit" className="btn btn-primary">
                 Save encrypted record <ArrowRight size={16} />
@@ -1411,15 +2068,6 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 title="Uses laptop webcam or USB document camera"
               >
                 <Camera size={14} /> {isCameraActive ? 'Close Camera' : 'Webcam / Scanner'}
-              </button>
-
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={loadDemoCard}
-                title="Generates a valid test Aadhaar document for instant testing"
-              >
-                <Sparkles size={14} /> Demo Card
               </button>
             </div>
 
@@ -1482,6 +2130,25 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
                 <strong>Multimodal Readback:</strong> Automatic speech synthesis in 7 regional languages for non-literate & visually impaired citizens.
               </span>
             </div>
+
+            {ocrFile && (
+              <div style={{
+                marginTop: '10px',
+                padding: '6px 12px',
+                borderRadius: 'var(--radius-full)',
+                backgroundColor: 'var(--status-good-bg)',
+                border: '1px solid var(--primary-border)',
+                color: 'var(--status-good)',
+                fontSize: '0.74rem',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}>
+                <CheckCircle2 size={13} />
+                <span>✓ Physical ID "{ocrFile.name}" auto-attached to case documents</span>
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
@@ -1767,6 +2434,24 @@ export const CitizenIntake: React.FC<CitizenIntakeProps> = ({
           </div>
         </aside>
       </div>
+
+      {/* Printable Pre-Filled Proforma Modal */}
+      {activeProformaSlot && selectedService && (
+        <PrintableProformaModal
+          citizen={formData}
+          service={selectedService}
+          slot={activeProformaSlot}
+          operatorName="Jan Seva Operator"
+          centreName="Common Service Centre"
+          onClose={() => setActiveProformaSlot(null)}
+          onAttachScan={async (file: File) => {
+            await handleAttachFiles([file], activeProformaSlot.id, activeProformaSlot.maxKB);
+          }}
+          onShowToast={(msg) => {
+            setToastNotice(msg);
+          }}
+        />
+      )}
     </div>
   );
 };

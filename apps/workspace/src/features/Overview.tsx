@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Users, 
   FileText, 
@@ -8,7 +8,9 @@ import {
   Plus, 
   ShieldAlert,
   Sliders,
-  ExternalLink
+  ExternalLink,
+  Zap,
+  Edit2
 } from 'lucide-react';
 import { PageId } from '../components/Sidebar';
 import { Citizen, Application, ServiceDefinition, maskIdentifier } from '@sevadesk/core-types';
@@ -20,7 +22,14 @@ interface OverviewProps {
   onNavigate: (page: PageId) => void;
   onEditCitizen: (citizenId: string) => void;
   onOpenApplication: (appId: string) => void;
+  onLaunchPortal?: (appId: string) => void;
   onCreateCaseForCitizen: (citizenId: string) => void;
+  operatorProfile?: {
+    operatorName: string;
+    centreName: string;
+    language: string;
+  };
+  onUpdateProfile?: (operatorName: string, centreName: string) => void;
 }
 
 export const Overview: React.FC<OverviewProps> = ({
@@ -30,8 +39,24 @@ export const Overview: React.FC<OverviewProps> = ({
   onNavigate,
   onEditCitizen,
   onOpenApplication,
-  onCreateCaseForCitizen
+  onLaunchPortal,
+  onCreateCaseForCitizen,
+  operatorProfile,
+  onUpdateProfile
 }) => {
+  const isDefaultProfile = Boolean(
+    operatorProfile && (
+      !operatorProfile.centreName ||
+      operatorProfile.centreName.toLowerCase().includes('service centre') ||
+      operatorProfile.centreName.toLowerCase() === 'csc centre' ||
+      operatorProfile.operatorName === 'Operator'
+    )
+  );
+
+  const [showQuickSetup, setShowQuickSetup] = useState(isDefaultProfile);
+  const [tempOpName, setTempOpName] = useState(operatorProfile?.operatorName || 'Operator');
+  const [tempCentreName, setTempCentreName] = useState(operatorProfile?.centreName || 'SevaDesk Service Centre');
+
   const activeApps = applications.filter(a => !['submitted', 'rejected', 'closed'].includes(a.status));
   const readyApps = applications.filter(a => a.status === 'ready');
   const attentionApps = applications.filter(a => a.status === 'needs_correction' || a.status === 'rejected');
@@ -56,7 +81,38 @@ export const Overview: React.FC<OverviewProps> = ({
             OPERATOR DESK
           </div>
           <h1>Good work starts with a clean record.</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', marginTop: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
+            <span style={{ 
+              fontSize: '0.8rem', 
+              color: 'var(--text-muted)', 
+              display: 'inline-flex', 
+              alignItems: 'center', 
+              gap: '6px',
+              backgroundColor: 'var(--panel-bg-subtle, #f3f4f6)',
+              padding: '2px 8px',
+              borderRadius: 'var(--radius-sm)'
+            }}>
+              🏪 <strong>{operatorProfile?.centreName || 'SevaDesk Kiosk'}</strong>
+              <span style={{ opacity: 0.5 }}>•</span>
+              👤 Operator: <strong>{operatorProfile?.operatorName || 'Operator'}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowQuickSetup(prev => !prev)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--primary)',
+                fontSize: '0.75rem',
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                padding: '0 4px'
+              }}
+            >
+              {showQuickSetup ? 'Hide setup' : 'Edit kiosk credentials'}
+            </button>
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '6px' }}>
             Prepare complete applications, catch preventable portal rejections and make every fee visible to the citizen.
           </p>
         </div>
@@ -69,6 +125,83 @@ export const Overview: React.FC<OverviewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Kiosk Identity Quick Setup Banner */}
+      {showQuickSetup && (
+        <div style={{
+          backgroundColor: '#eff6ff',
+          border: '1px solid #bfdbfe',
+          borderRadius: 'var(--radius-md)',
+          padding: '16px 20px',
+          marginBottom: '24px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px',
+          boxShadow: '0 1px 3px rgba(30, 64, 175, 0.08)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '1.4rem' }}>🏪</span>
+              <div>
+                <strong style={{ color: '#1e40af', fontSize: '0.95rem' }}>
+                  {isDefaultProfile ? 'Complete Your Kiosk Identity Setup' : 'Update Kiosk Identity Credentials'}
+                </strong>
+                <p style={{ margin: '2px 0 0', fontSize: '0.8rem', color: '#3b82f6' }}>
+                  Set your Jan Seva Kendra / CSC Centre name and Operator name so official printed citizen slips, fee disclosures, and portal handoffs display authentic credentials.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowQuickSetup(false)}
+              style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: '0.8rem' }}
+            >
+              ✕ Dismiss
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', alignItems: 'flex-end' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#1e3a8a', marginBottom: '4px' }}>
+                Centre Name / Jan Seva Kendra
+              </label>
+              <input
+                className="form-control"
+                placeholder="e.g. Maa Durga Jan Seva Kendra, Mawana"
+                value={tempCentreName}
+                onChange={e => setTempCentreName(e.target.value)}
+                style={{ backgroundColor: '#ffffff', fontSize: '0.85rem' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#1e3a8a', marginBottom: '4px' }}>
+                Operator / VLE Name & ID
+              </label>
+              <input
+                className="form-control"
+                placeholder="e.g. Ramesh Kumar (UP-CSC-849201)"
+                value={tempOpName}
+                onChange={e => setTempOpName(e.target.value)}
+                style={{ backgroundColor: '#ffffff', fontSize: '0.85rem' }}
+              />
+            </div>
+            <div>
+              <button
+                className="btn btn-primary"
+                style={{ width: '100%', fontSize: '0.85rem', fontWeight: 700 }}
+                onClick={() => {
+                  if (onUpdateProfile && tempCentreName.trim()) {
+                    onUpdateProfile(tempOpName.trim() || 'Operator', tempCentreName.trim());
+                    setShowQuickSetup(false);
+                  }
+                }}
+              >
+                ✓ Save Kiosk Credentials
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Metric Cards */}
       <div className="stat-grid">
@@ -154,9 +287,21 @@ export const Overview: React.FC<OverviewProps> = ({
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        <button className="btn btn-secondary btn-xs" onClick={() => onOpenApplication(app.id)}>
-                          Review
-                        </button>
+                        <div style={{ display: 'inline-flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                          {app.status === 'ready' && (
+                            <button
+                              className="btn btn-primary btn-xs"
+                              onClick={() => onLaunchPortal ? onLaunchPortal(app.id) : onOpenApplication(app.id)}
+                              style={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              title="1-Click Launch into State Portal Simulator"
+                            >
+                              <Zap size={11} /> Launch ↗
+                            </button>
+                          )}
+                          <button className="btn btn-secondary btn-xs" onClick={() => onOpenApplication(app.id)}>
+                            Review
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -166,22 +311,21 @@ export const Overview: React.FC<OverviewProps> = ({
           )}
         </section>
 
-        {/* 4-Step Standard Operating Procedure */}
+        {/* 3-Step Streamlined Operator Workflow */}
         <section className="panel">
           <div className="panel-header">
             <div>
-              <h3>Recommended operator workflow</h3>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>From citizen intake to verified submission</p>
+              <h3>Streamlined operator workflow</h3>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>From counter intake to verified submission & citizen slip</p>
             </div>
-            <span className="status-pill good">4 steps</span>
+            <span className="status-pill good">3 fast steps</span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             {[
-              { num: '01', title: 'Create citizen record', desc: 'Scan identity card via local OCR or enter manually with citizen consent.', page: 'intake' as PageId },
-              { num: '02', title: 'Configure service rules', desc: 'Confirm official portal URL, upload MB limit, allowed file extensions and official fee.', page: 'services' as PageId },
-              { num: '03', title: 'Run explainable preflight', desc: 'Resolve format errors and mandatory field gaps before opening the portal.', page: 'applications' as PageId },
-              { num: '04', title: 'Fill, inspect & manual submit', desc: 'Use the browser extension to map fields. Operator personally verifies and submits.', page: 'applications' as PageId },
+              { num: '01', title: 'Smart Intake & Preflight', desc: 'Select scheme, scan ID via local OCR, attach slot-optimized docs, and verify 100% preflight inline.', page: 'intake' as PageId },
+              { num: '02', title: 'Fast-Burst Portal Injection', desc: 'Sub-150ms autofill of reviewed demographic fields & pre-sized attachments into state portal or simulator.', page: 'applications' as PageId },
+              { num: '03', title: 'Instant Acknowledgement & Slip', desc: 'Auto-capture portal reference number, print bilingual citizen receipt slip, and seal case.', page: 'applications' as PageId },
             ].map(step => (
               <div key={step.num} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '12px', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-subtle)' }}>
                 <div style={{

@@ -39,6 +39,19 @@ export interface Citizen {
   updatedAt: string;
 }
 
+export interface DocumentSlotDefinition {
+  id: string;
+  label: string;
+  maxKB: number;
+  allowedExtensions: string[];
+  required: boolean;
+  description?: string;
+  proformaType?: 'self_declaration' | 'income_affidavit' | 'caste_declaration' | 'general_proforma';
+  proformaTitle?: string;
+}
+
+export type ProformaType = 'self_declaration' | 'income_affidavit' | 'caste_declaration' | 'general_proforma';
+
 export interface ServiceDefinition {
   id: string;
   name: string;
@@ -51,6 +64,7 @@ export interface ServiceDefinition {
   maxUploadMB?: number | null;
   allowedExtensions?: string[];
   requiredFields?: FieldKey[];
+  documentSlots?: DocumentSlotDefinition[];
   adapterId?: string;
   notes?: string;
   createdAt?: string;
@@ -61,6 +75,16 @@ export interface DocumentInfo {
   name: string;
   size: number;
   type: string;
+}
+
+export interface ApplicationDocument {
+  name: string;
+  size: number;
+  type: string;
+  optimised?: boolean;
+  dataUrl?: string;
+  role?: string;
+  slotId?: string;
 }
 
 export interface ValidationError {
@@ -99,8 +123,14 @@ export interface Application {
   statusNote?: string;
   portalErrorCategory?: string;
   preflight?: PreflightSnapshot | null;
+  documents?: ApplicationDocument[];
   createdAt: string;
   updatedAt: string;
+  feeStatus?: 'pending' | 'collected';
+  feeCollectedAt?: string;
+  feeReceiptNo?: string;
+  certificateRef?: string;
+  deliveredAt?: string;
 }
 
 export interface AuditEvent {
@@ -153,3 +183,9 @@ export declare function extractOcrCandidates(text?: string): OcrCandidate[];
 export declare function interpretPortalError(message?: string): PortalErrorInterpretation;
 export declare function formatINR(value: number | string | null | undefined): string;
 export declare function buildApplicationPayload(application: Application, citizen: Citizen, service: ServiceDefinition): any;
+
+export declare const STATUS_TRANSITIONS: Record<string, string[]>;
+export declare function validateStatusTransition(currentStatus?: string, targetStatus?: string): { allowed: boolean; reason?: string };
+export declare function isCitizenLocked(citizenId?: string, applications?: Application[]): boolean;
+
+export { deriveVaultKey, encryptVault, decryptVault, base64ToBytes } from './vault.js';

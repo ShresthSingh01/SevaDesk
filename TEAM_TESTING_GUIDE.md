@@ -89,6 +89,8 @@ This concurrently launches:
    * Click **"Save citizen details"**.
    * **Expected Result:** The citizen record is encrypted into the vault and synchronized to the local SQLite database.
 
+> 💡 **Instant 1-Click Real Example:** Instead of typing manually, you can also simply click the **"⚡ Load Real Example (Ramesh Chand Verma)"** button at the top right of Citizen Intake! This instantly loads complete, realistic farmer demographic data with verified Verhoeff Aadhaar (`999999999999`), DPDP consent, address, and selects UP e-District Income Certificate.
+
 ---
 
 ### Test 4: Physical Document OCR (Local Pixel Extraction)
@@ -140,14 +142,19 @@ This concurrently launches:
    ```
    d:\SevaDesk\apps\extension
    ```
-5. Open any web page (e.g., `https://edistrict.up.gov.in` or a test form).
+5. Open the built-in **State Portal Simulator** in a new tab:
+   ```
+   http://localhost:5173/?view=simulator&portal=edistrict.up.gov.in
+   ```
+   *(Or click the **"Portal Simulator ↗"** button in Application Detail or the sidebar).*
 6. Click the **SevaDesk Companion** puzzle icon in your Chrome toolbar.
 7. **Expected Result:**
    * The extension automatically connects to the Local Core daemon via loopback (`http://127.0.0.1:8765/api/bridge/active-session`).
-   * Displays green status: *"Bridge Active: Loaded reviewed data for Rajesh Kumar Sharma (Income Certificate)"* with zero manual copy-pasting.
-   * Matches fields using native CSS selector resolution (`element.matches()`) and stable element fingerprints.
-   * Click **"Fill reviewed fields"** to inject the reviewed values with native framework event dispatchers.
-   * Password, CAPTCHA, OTP, and submit controls are strictly excluded, keeping the operator in complete control.
+   * Automatically activates the **UP e-District** adapter (`up-edistrict-v1`) with 100% selector confidence.
+   * Displays green status: *"Bridge Active: Loaded reviewed data for Ramesh Chand Verma (Income Certificate)"* with zero manual copy-pasting.
+   * Matches all 8 fields (`#txtApplicantNameEng`, `#txtDOB`, `#ddlGender`, `#txtMobile`, `#txtAddressPermanent`, `#ddlDistrict`, `#txtPin`, `#txtAadhaarNumber`).
+   * Click **"⚡ Fast-Burst Reviewed Fields"** to inject the reviewed values into the form in under 150 ms!
+   * Notice inputs glow green with `[✓ Injected by SevaDesk]` tags while Password, CAPTCHA, and Submit controls remain untouched.
 
 ---
 
@@ -208,22 +215,28 @@ This concurrently launches:
 
 ### Test 13: Fast-Burst Companion Autofill & 1-Click Timeout Session Guard
 1. From the Application Detail page, click **"Send to Companion"**.
-2. Open Google Chrome with the companion extension loaded from `apps/extension`.
-3. Open any portal or web form (e.g. `https://edistrict.up.gov.in` or a sample HTML form).
-4. Click the **SevaDesk Companion** icon.
-5. **Test Fast-Burst Injection:**
+2. Open the built-in **State Portal Simulator** (`http://localhost:5173/?view=simulator&portal=edistrict.up.gov.in`) or click **"Portal Simulator ↗"**.
+3. Click the **SevaDesk Companion** extension icon in your Chrome toolbar.
+4. **Test Fast-Burst Injection:**
    * Click **"⚡ Fast-Burst Reviewed Fields"**.
    * **Expected Result:** Injects all matching values into the portal inputs in under 150 ms and displays:
-     > *"⚡ Injected N fields in XX ms"*
-6. **Test 1-Click Session Guard (Timeout Recovery):**
-   * Reload the web page (simulating a portal crash, gateway error, or 504 timeout).
+     > *"⚡ Injected 8 fields in 38 ms"*
+   * The inputs on the simulator form immediately light up with green borders and `[✓ Injected by SevaDesk]` tags!
+5. **Test 1-Click Session Guard (Timeout Recovery):**
+   * On the simulator page, click the red **"504 Timeout"** button (simulating a government server timeout or session drop).
+   * Click **"Restore Portal Page"** on the simulator to get a clean blank form.
    * Open the extension popup again.
    * Notice the amber banner: *"Active Session Cached — 1-click restore available if portal timed out."*
    * Click **"⚡ Restore Last Session"**.
    * **Expected Result:** Instantly re-injects all fields without needing to re-open the SevaDesk workspace.
-7. **Test On-Portal Error Inspector:**
-   * Click **"🔍 Scan On-Screen Portal Errors"**.
+6. **Test On-Portal Error Inspector:**
+   * On the simulator, click the amber **"Trigger Error"** button (simulating an upload size or Aadhaar gateway error).
+   * Open the extension and click **"🔍 Scan On-Screen Portal Errors"**.
    * **Expected Result:** Scans the active page for error alerts/banners and queries the local reverse error classifier (`/api/error-interpreter/analyze`) to output plain Hindi/English operator solutions.
+7. **Simulate Official Submission:**
+   * On the simulator form, enter the 4-digit CAPTCHA (`7492`) and click **"सुरक्षित करें (Submit Application)"**.
+   * **Expected Result:** The simulator generates an official acknowledgement number (e.g., `UPED-2026-98124018`).
+   * Switch back to SevaDesk Workspace, click **"Update status"**, enter this receipt reference, and set status to **"Submitted"**. Notice how the applicant particulars are permanently locked under DPDP audit rules.
 
 ---
 

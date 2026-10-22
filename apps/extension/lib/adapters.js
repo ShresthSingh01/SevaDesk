@@ -272,7 +272,23 @@ export function findAdapterByUrl(url = '') {
   try {
     const parsed = new URL(url);
     const domain = parsed.hostname.toLowerCase();
-    const match = PORTAL_ADAPTERS.find(a => a.portalDomain !== '*' && domain.includes(a.portalDomain.toLowerCase()));
+    const fullHref = url.toLowerCase();
+
+    // Check if query parameter explicitly targets a portal (e.g. ?portal=edistrict.up.gov.in or ?portal=up-edistrict-v1)
+    const portalParam = parsed.searchParams?.get('portal')?.toLowerCase();
+    if (portalParam) {
+      const paramMatch = PORTAL_ADAPTERS.find(a => 
+        a.id.toLowerCase() === portalParam ||
+        a.portalDomain.toLowerCase().includes(portalParam) ||
+        portalParam.includes(a.portalDomain.toLowerCase())
+      );
+      if (paramMatch) return paramMatch;
+    }
+
+    const match = PORTAL_ADAPTERS.find(a => a.portalDomain !== '*' && (
+      domain.includes(a.portalDomain.toLowerCase()) ||
+      fullHref.includes(a.portalDomain.toLowerCase())
+    ));
     return match || PORTAL_ADAPTERS.find(a => a.id === 'generic-fallback');
   } catch {
     return PORTAL_ADAPTERS.find(a => a.id === 'generic-fallback');

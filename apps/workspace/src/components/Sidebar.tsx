@@ -8,10 +8,11 @@ import {
   ScrollText, 
   ShieldCheck, 
   LogOut,
-  ExternalLink
+  ExternalLink,
+  Globe
 } from 'lucide-react';
 
-export type PageId = 'overview' | 'intake' | 'applications' | 'fees' | 'services' | 'audit' | 'citizenDisplay';
+export type PageId = 'overview' | 'intake' | 'applications' | 'fees' | 'services' | 'audit' | 'citizenDisplay' | 'simulator';
 
 interface SidebarProps {
   currentPage: PageId;
@@ -37,6 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'fees' as PageId, label: 'Fee transparency', icon: IndianRupee },
     { id: 'services' as PageId, label: 'Services & rules', icon: Settings2 },
     { id: 'audit' as PageId, label: 'Audit trail', icon: ScrollText },
+    { id: 'simulator' as PageId, label: 'Portal simulator', icon: Globe },
   ];
 
   return (
@@ -125,6 +127,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
       </nav>
+
+      {/* Live Auxiliary Displays */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
+        <a
+          href="/?view=citizen"
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '7px 10px',
+            borderRadius: 'var(--radius-md)',
+            backgroundColor: 'var(--bg-subtle)',
+            color: 'var(--text-main)',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            textDecoration: 'none',
+            border: '1px solid var(--border-light)'
+          }}
+          title="Open secondary monitor citizen fee transparency view"
+        >
+          <span>🖥️ Citizen display</span>
+          <ExternalLink size={13} color="var(--primary)" />
+        </a>
+      </div>
 
       {/* Privacy Callout */}
       <div style={{
